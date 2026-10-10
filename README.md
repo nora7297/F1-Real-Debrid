@@ -15,36 +15,43 @@ you open the app, so the links are normally already there when you sit down to w
 
 ## Installing
 
-The APK is built by GitHub Actions. After every push to `main` the workflow publishes a
-pre-release called **`latest`** on the repository's *Releases* page with `F1-Replays.apk` attached,
-and the same file is also available as a workflow artifact.
+The APK is built by GitHub Actions. After every push to `main` the workflow recreates the
+pre-release **`latest`** with `F1-Replays.apk` attached, so this download link never changes:
 
-> This repository is private, so the release download URL needs a GitHub login. The easiest way to
-> get the APK onto the TV is therefore via a computer:
+```
+https://github.com/nora7297/F1-Real-Debrid/releases/download/latest/F1-Replays.apk
+```
 
-### NVIDIA Shield (and other Android TV devices)
+The repository has to be **public** for that link to work without a GitHub login (GitHub →
+*Settings → General → Danger Zone → Change visibility*). While it is private, download the APK from
+the *Releases* page on a computer and use the ADB route below.
 
-1. On the Shield: *Settings → Device Preferences → About → Build* (press 7 times) to enable developer
-   options, then *Settings → Device Preferences → Developer options → Network debugging → On*.
-   Note the Shield's IP address (*Settings → Network*).
-2. On your computer, download `F1-Replays.apk` from the Releases page and install it with ADB:
+### With the Downloader app (Shield and Fire TV, no computer needed)
+
+1. Install **Downloader** (by AFTVnews) from the Play Store on the Shield, or from the Amazon
+   Appstore on a Fire TV.
+2. Allow it to install apps:
+   * Shield: *Settings → Device Preferences → Security & restrictions → Unknown sources → Downloader*.
+   * Fire TV: *Settings → My Fire TV → Developer Options → Install unknown apps → Downloader*.
+3. Open Downloader and enter the link above. To avoid typing it with the remote, create a short
+   code for it once at https://go.aftvnews.com and type just the number, or make a custom short
+   link (for example a TinyURL alias) that points at the link above.
+4. Downloader fetches the APK and offers to install it. For updates, pick the same entry from
+   Downloader's history and install again.
+
+### With ADB from a computer
+
+1. Shield: *Settings → Device Preferences → About → Build* (press 7 times), then
+   *Developer options → Network debugging → On*. Fire TV: *Settings → My Fire TV → Developer
+   Options → ADB debugging → On*. Note the TV's IP address in its network settings.
+2. On the computer:
    ```
-   adb connect <shield-ip>:5555
+   adb connect <tv-ip>:5555
    adb install -r F1-Replays.apk
    ```
-   (Alternatives: the "Send files to TV" app, or copy the APK onto a USB stick and open it with a
-   file manager such as X-plore.)
 
-### Amazon Fire TV Stick
-
-1. *Settings → My Fire TV → Developer Options → ADB debugging → On* and *Apps from Unknown Sources → On*
-   (on newer Fire OS versions the second one is per-app under *Install unknown apps*).
-2. Either use ADB exactly as above (`adb connect <firestick-ip>:5555`), or install the **Downloader**
-   app from the Amazon store and point it at a URL where you host the APK (a public GitHub release
-   would work directly; a private one does not because Downloader cannot log in).
-
-The app is signed with the keystore in `ci/`, so a newer build installs over the old one as an update
-and keeps your login and library.
+Every build is signed with the keystore in `ci/`, so a newer build installs over the old one as an
+update and keeps your login and library.
 
 ## First run
 
