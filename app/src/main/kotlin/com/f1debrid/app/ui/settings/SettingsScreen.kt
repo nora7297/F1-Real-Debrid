@@ -38,6 +38,8 @@ import com.f1debrid.app.Graph
 import com.f1debrid.app.data.AppSettings
 import com.f1debrid.app.data.PlayerChoice
 import com.f1debrid.app.sync.SyncScheduler
+import com.f1debrid.app.update.UpdateState
+import com.f1debrid.app.update.UpdateUi
 import com.f1debrid.app.ui.common.InfoText
 import com.f1debrid.app.ui.common.ScreenScaffold
 import com.f1debrid.core.model.QualityPolicy
@@ -53,6 +55,7 @@ fun SettingsScreen(graph: Graph, onBack: () -> Unit) {
     val settings by graph.prefs.settings.collectAsState()
     val tokens by graph.prefs.tokens.collectAsState()
     val catalog by graph.catalogStore.catalog.collectAsState()
+    val update by graph.updater.state.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var confirmLogout by remember { mutableStateOf(false) }
@@ -199,9 +202,19 @@ fun SettingsScreen(graph: Graph, onBack: () -> Unit) {
                 }
             }
 
-            item { SectionHeader("About") }
+            item { SectionHeader("About & updates") }
             item {
-                InfoText("F1 Replays ${BuildConfig.VERSION_NAME} · scans r/${settings.subreddit} for Formula 1 replays and adds them to Real-Debrid.")
+                SettingRow("Version", "F1 Replays ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})", enabled = false) {}
+            }
+            item {
+                SettingRow(
+                    title = UpdateUi.buttonLabel(update) ?: "Check for updates",
+                    value = UpdateUi.statusText(update),
+                    enabled = update !is UpdateState.Downloading && update != UpdateState.Checking,
+                ) { UpdateUi.act(context, graph, update) }
+            }
+            item {
+                InfoText("Scans r/${settings.subreddit} for Formula 1 replays and adds them to Real-Debrid. Source and builds: github.com/nora7297/F1-Real-Debrid")
             }
         }
     }

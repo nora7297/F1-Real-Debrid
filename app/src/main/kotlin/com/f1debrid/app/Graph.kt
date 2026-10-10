@@ -6,6 +6,7 @@ import com.f1debrid.app.data.FileCatalogStore
 import com.f1debrid.app.data.Prefs
 import com.f1debrid.app.data.RdSession
 import com.f1debrid.app.sync.SyncCoordinator
+import com.f1debrid.app.update.Updater
 import com.f1debrid.core.rd.RealDebridApi
 import com.f1debrid.core.rd.RealDebridAuth
 import com.f1debrid.core.rd.RealDebridClient
@@ -46,6 +47,7 @@ class Graph(val app: Application) {
         log = { Log.d(TAG, it) },
     )
     val sync = SyncCoordinator(scope, engine, session, catalogStore)
+    val updater = Updater(app, http, scope)
 
     companion object {
         const val TAG = "F1Debrid"

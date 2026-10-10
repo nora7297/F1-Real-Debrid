@@ -53,6 +53,14 @@ the *Releases* page on a computer and use the ADB route below.
 Every build is signed with the keystore in `ci/`, so a newer build installs over the old one as an
 update and keeps your login and library.
 
+### Updating from inside the app
+
+The app checks the `latest` release for a newer build when it opens (and from *Settings → Check for
+updates*). When one exists an **Update to build N** button appears next to *Sync now*: it downloads
+the APK, verifies its checksum and opens the system installer. The first time, Android asks you to
+allow F1 Replays to install apps; allow it, come back and press *Install* again. The running version
+is shown under the title on the home screen and in Settings.
+
 ## First run
 
 1. Open **F1 Replays**. It shows a short code and the address `https://real-debrid.com/device`.

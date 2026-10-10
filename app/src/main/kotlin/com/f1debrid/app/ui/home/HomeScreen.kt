@@ -17,13 +17,17 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Button
 import androidx.tv.material3.ListItem
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.f1debrid.app.BuildConfig
 import com.f1debrid.app.Graph
+import com.f1debrid.app.update.UpdateState
+import com.f1debrid.app.update.UpdateUi
 import com.f1debrid.app.ui.common.InfoText
 import com.f1debrid.app.ui.common.ScreenScaffold
 import com.f1debrid.app.ui.common.StatusPill
@@ -38,6 +42,8 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     val catalog by graph.catalogStore.catalog.collectAsState()
     val sync by graph.sync.state.collectAsState()
     val tokens by graph.prefs.tokens.collectAsState()
+    val update by graph.updater.state.collectAsState()
+    val context = LocalContext.current
     val groups = remember(catalog.entries) { CatalogGrouping.group(catalog.entries) }
 
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -50,6 +56,7 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
 
     val firstError = sync.lastError ?: sync.lastReport?.errors?.firstOrNull()
     val subtitle = buildString {
+        append("v").append(BuildConfig.VERSION_NAME).append(" · ")
         if (sync.message != null) {
             append(sync.message)
         } else {
@@ -63,6 +70,12 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
         title = "F1 Replays",
         subtitle = subtitle,
         actions = {
+            UpdateUi.buttonLabel(update)?.let { label ->
+                Button(
+                    onClick = { UpdateUi.act(context, graph, update) },
+                    enabled = update !is UpdateState.Downloading,
+                ) { Text(label) }
+            }
             Button(onClick = { graph.sync.requestSync("manual") }, enabled = !sync.running) {
                 Text(if (sync.running) "Syncing…" else "Sync now")
             }
@@ -71,6 +84,10 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     ) {
         if (firstError != null && !sync.running) {
             InfoText("Last sync problem: $firstError", color = MaterialTheme.colorScheme.error)
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        if (update is UpdateState.NeedsPermission || (update is UpdateState.Error && (update as UpdateState.Error).info != null)) {
+            InfoText(UpdateUi.statusText(update), color = MaterialTheme.colorScheme.error)
             Spacer(modifier = Modifier.height(8.dp))
         }
         if (groups.isEmpty()) {

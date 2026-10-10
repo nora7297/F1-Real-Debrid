@@ -39,6 +39,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Refresh when the app is opened, unless a sync ran very recently.
         graph.sync.syncIfStale(maxAgeMs = 15 * 60_000L, reason = "app opened")
+        graph.updater.checkIfStale(maxAgeMs = 6 * 3_600_000L)
     }
 }
 
