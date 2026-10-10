@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.F1Debrid" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0E0E10</item>
+        <item name="android:colorPrimary">#E10600</item>
+        <item name="android:colorAccent">#E10600</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+
+    <style name="Theme.F1Debrid.Player">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>
