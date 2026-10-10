@@ -25,6 +25,8 @@ data class AppSettings(
     val subreddit: String = "MotorsportsReplays",
     val fetchComments: Boolean = true,
     val includeUnknownQuality: Boolean = false,
+    /** Client id of the user's own Reddit "installed app"; optional, used when Reddit blocks anonymous requests. */
+    val redditClientId: String? = null,
 ) {
     fun toSyncSettings(): SyncSettings = SyncSettings(
         subreddit = subreddit,
@@ -56,6 +58,7 @@ class Prefs(context: Context) {
             .putString(KEY_SUBREDDIT, s.subreddit)
             .putBoolean(KEY_COMMENTS, s.fetchComments)
             .putBoolean(KEY_UNKNOWN_QUALITY, s.includeUnknownQuality)
+            .putString(KEY_REDDIT_CLIENT_ID, s.redditClientId ?: "")
             .apply()
         _settings.value = s
     }
@@ -88,8 +91,18 @@ class Prefs(context: Context) {
             subreddit = sp.getString(KEY_SUBREDDIT, null)?.takeIf { it.isNotBlank() } ?: defaults.subreddit,
             fetchComments = sp.getBoolean(KEY_COMMENTS, defaults.fetchComments),
             includeUnknownQuality = sp.getBoolean(KEY_UNKNOWN_QUALITY, defaults.includeUnknownQuality),
+            redditClientId = sp.getString(KEY_REDDIT_CLIENT_ID, null)?.trim()?.takeIf { it.isNotEmpty() },
         )
     }
+
+    /** Stable per-install id Reddit asks for with the installed-app grant. */
+    val redditDeviceId: String
+        get() {
+            sp.getString(KEY_REDDIT_DEVICE_ID, null)?.let { return it }
+            val id = java.util.UUID.randomUUID().toString().replace("-", "").take(30)
+            sp.edit().putString(KEY_REDDIT_DEVICE_ID, id).apply()
+            return id
+        }
 
     private fun readTokens(): RdTokens? {
         val raw = sp.getString(KEY_TOKENS, null) ?: return null
@@ -109,5 +122,7 @@ class Prefs(context: Context) {
         const val KEY_COMMENTS = "fetch_comments"
         const val KEY_UNKNOWN_QUALITY = "include_unknown_quality"
         const val KEY_TOKENS = "rd_tokens"
+        const val KEY_REDDIT_CLIENT_ID = "reddit_client_id"
+        const val KEY_REDDIT_DEVICE_ID = "reddit_device_id"
     }
 }

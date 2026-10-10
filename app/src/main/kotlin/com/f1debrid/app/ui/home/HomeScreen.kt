@@ -48,13 +48,13 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
         }
     }
 
+    val firstError = sync.lastError ?: sync.lastReport?.errors?.firstOrNull()
     val subtitle = buildString {
         if (sync.message != null) {
             append(sync.message)
         } else {
             append("Last sync: ").append(Naming.relativeTime(catalog.lastSyncAt, now))
             catalog.lastSyncSummary?.let { append(" · ").append(it) }
-            sync.lastError?.let { append(" · Error: ").append(it) }
         }
         tokens?.username?.let { append(" · Real-Debrid: ").append(it) }
     }
@@ -69,8 +69,12 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
             Button(onClick = onSettings) { Text("Settings") }
         },
     ) {
+        if (firstError != null && !sync.running) {
+            InfoText("Last sync problem: $firstError", color = MaterialTheme.colorScheme.error)
+            Spacer(modifier = Modifier.height(8.dp))
+        }
         if (groups.isEmpty()) {
-            EmptyState(syncing = sync.running, error = sync.lastError)
+            EmptyState(syncing = sync.running, error = null)
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),

@@ -240,7 +240,7 @@ class SyncEngine(
     }
 
     private fun shouldCheckComments(post: RedditPost, checked: Map<String, Long>, now: Long): Boolean {
-        if (post.numComments <= 0) return false
+        if (post.numComments == 0) return false
         val last = checked[post.id] ?: return true
         val age = now - post.createdMillis
         return age < 3 * DAY_MS && now - last > 12 * HOUR_MS

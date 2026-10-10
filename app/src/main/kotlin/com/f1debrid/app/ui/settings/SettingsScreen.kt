@@ -1,6 +1,18 @@
 package com.f1debrid.app.ui.settings
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -45,6 +57,8 @@ fun SettingsScreen(graph: Graph, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var confirmLogout by remember { mutableStateOf(false) }
     var confirmReset by remember { mutableStateOf(false) }
+    var editingClientId by remember { mutableStateOf(false) }
+    var clientIdDraft by remember { mutableStateOf("") }
 
     fun update(transform: (AppSettings) -> AppSettings) = graph.prefs.update(transform)
 
@@ -101,6 +115,48 @@ fun SettingsScreen(graph: Graph, onBack: () -> Unit) {
                 }
             }
             item { SettingRow("Subreddit", "r/${settings.subreddit}", enabled = false) {} }
+            item {
+                SettingRow(
+                    "Reddit app client ID (optional)",
+                    when {
+                        editingClientId -> "Type the client ID below and press Save"
+                        settings.redditClientId != null -> "Set (${settings.redditClientId!!.take(4)}…) – Reddit's official API is used first"
+                        else -> "Not set. Only needed if Reddit keeps blocking the sync: create an \"installed app\" at reddit.com/prefs/apps and enter its ID here"
+                    },
+                ) {
+                    clientIdDraft = settings.redditClientId ?: ""
+                    editingClientId = !editingClientId
+                }
+            }
+            if (editingClientId) {
+                item {
+                    Column {
+                        BasicTextField(
+                            value = clientIdDraft,
+                            onValueChange = { clientIdDraft = it.trim() },
+                            singleLine = true,
+                            textStyle = TextStyle(color = Color.White, fontSize = 18.sp),
+                            cursorBrush = SolidColor(Color.White),
+                            modifier = Modifier
+                                .fillMaxWidth(0.6f)
+                                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                .padding(14.dp),
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Button(onClick = {
+                                update { it.copy(redditClientId = clientIdDraft.takeIf { d -> d.isNotBlank() }) }
+                                editingClientId = false
+                            }) { Text("Save") }
+                            Button(onClick = {
+                                update { it.copy(redditClientId = null) }
+                                editingClientId = false
+                            }) { Text("Clear") }
+                            Button(onClick = { editingClientId = false }) { Text("Cancel") }
+                        }
+                    }
+                }
+            }
 
             item { SectionHeader("Playback") }
             item {

@@ -34,6 +34,8 @@ class Graph(val app: Application) {
     val reddit = RedditClient(
         http,
         userAgent = "android:${BuildConfig.APPLICATION_ID}:v${BuildConfig.VERSION_NAME} (F1 replays to Real-Debrid TV app)",
+        clientId = { prefs.settings.value.redditClientId },
+        deviceId = prefs.redditDeviceId,
     )
     val catalogStore = FileCatalogStore(app)
     val engine = SyncEngine(

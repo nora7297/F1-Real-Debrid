@@ -72,9 +72,18 @@ https://real-debrid.com/apitoken.
 | Background sync | every 6 h | Interval of the WorkManager job (also runs on app open if the last sync is older than 15 min). |
 | Player | Built-in | Built-in ExoPlayer, an external player via the system "Play with…" chooser, or ask every time. |
 | Read comments | on | Look in the comments of F1 posts that have no magnet in the body. |
+| Reddit app client ID | empty | Optional. If Reddit keeps blocking the sync, create an *installed app* at https://www.reddit.com/prefs/apps and enter its client ID here; the app then uses Reddit's official API, which is never blocked. |
 
 Removing a release in the app remembers it so it is not re-added by the next sync.
 Nothing is ever deleted from your Real-Debrid account by the app.
+
+## How the app reads Reddit
+
+No Reddit account is needed. The sync tries, in order: Reddit's official API (only if you entered a
+client ID in Settings), the public JSON listing with the app's own User-Agent and then a browser
+one, and finally the subreddit's RSS feed, which Reddit keeps open for feed readers. The route that
+worked last is tried first next time. If every route fails, the home screen shows the HTTP status
+each one returned.
 
 ## How playback works
 

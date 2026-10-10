@@ -21,7 +21,8 @@ data class RedditPost(
     val author: String? = null,
     @SerialName("created_utc") val createdUtc: Double = 0.0,
     val permalink: String = "",
-    @SerialName("num_comments") val numComments: Int = 0,
+    /** -1 when unknown (RSS feeds do not say). */
+    @SerialName("num_comments") val numComments: Int = -1,
     val stickied: Boolean = false,
 ) {
     val createdMillis: Long get() = (createdUtc * 1000).toLong()
