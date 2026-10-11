@@ -1,9 +1,11 @@
 package com.f1debrid.app.update
 
 import android.app.Application
+import android.app.PendingIntent
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -44,6 +46,8 @@ sealed interface UpdateState {
     data class Downloading(val info: UpdateInfo, val percent: Int) : UpdateState
     data class ReadyToInstall(val info: UpdateInfo, val file: File) : UpdateState
     data class NeedsPermission(val info: UpdateInfo, val file: File) : UpdateState
+    data class Installing(val info: UpdateInfo) : UpdateState
+    data class Installed(val info: UpdateInfo) : UpdateState
     data class Error(val message: String, val info: UpdateInfo? = null) : UpdateState
 }
 
@@ -150,9 +154,13 @@ class Updater(
     }
 
     /**
-     * Opens the system installer. On Android 8+ the user must first allow this app to install
+     * Installs the downloaded APK. On Android 8+ the user must first allow this app to install
      * unknown apps; in that case the matching settings page is opened and the state becomes
      * [UpdateState.NeedsPermission] so the UI can ask them to press Install again.
+     *
+     * The install itself goes through a [PackageInstaller] session (the system shows its usual
+     * confirmation and reports success or the exact failure back to [InstallResultReceiver]).
+     * If a session cannot be created, the classic ACTION_VIEW installer intent is used instead.
      */
     fun install(activityContext: Context, info: UpdateInfo, file: File) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !app.packageManager.canRequestPackageInstalls()) {
@@ -165,15 +173,67 @@ class Updater(
                 Log.w(TAG, "No settings screen for unknown app sources; trying the installer directly")
             }
         }
+        _state.value = UpdateState.Installing(info)
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) { installWithSession(info, file) }
+            } catch (e: Exception) {
+                Log.w(TAG, "PackageInstaller session failed, falling back to the installer intent", e)
+                installWithIntent(activityContext, info, file)
+            }
+        }
+    }
+
+    private fun installWithSession(info: UpdateInfo, file: File) {
+        val installer = app.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+        params.setAppPackageName(app.packageName)
+        params.setSize(file.length())
+        val sessionId = installer.createSession(params)
+        installer.openSession(sessionId).use { session ->
+            session.openWrite("F1-Replays.apk", 0, file.length()).use { out ->
+                file.inputStream().use { it.copyTo(out) }
+                session.fsync(out)
+            }
+            val intent = Intent(app, InstallResultReceiver::class.java)
+                .setAction(InstallResultReceiver.ACTION)
+                .putExtra(InstallResultReceiver.EXTRA_VERSION_CODE, info.versionCode)
+            var flags = PendingIntent.FLAG_UPDATE_CURRENT
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) flags = flags or PendingIntent.FLAG_MUTABLE
+            val pending = PendingIntent.getBroadcast(app, sessionId, intent, flags)
+            session.commit(pending.intentSender)
+        }
+        Log.i(TAG, "Install session $sessionId committed for build ${info.versionCode}")
+    }
+
+    private fun installWithIntent(activityContext: Context, info: UpdateInfo, file: File) {
         try {
             val uri = FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", file)
             val intent = Intent(Intent.ACTION_VIEW)
                 .setDataAndType(uri, "application/vnd.android.package-archive")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             activityContext.startActivity(intent)
+            _state.value = UpdateState.ReadyToInstall(info, file)
         } catch (e: Exception) {
             Log.w(TAG, "Could not start installer", e)
             _state.value = UpdateState.Error("Could not open the installer: ${e.message}", info)
         }
+    }
+
+    /** Called by [InstallResultReceiver] with the outcome the system reported. */
+    fun onInstallResult(success: Boolean, message: String?) {
+        val current = _state.value
+        val info = when (current) {
+            is UpdateState.Installing -> current.info
+            is UpdateState.ReadyToInstall -> current.info
+            is UpdateState.Error -> current.info
+            else -> null
+        }
+        _state.value = when {
+            success && info != null -> UpdateState.Installed(info)
+            success -> UpdateState.UpToDate
+            else -> UpdateState.Error("Install failed: ${message ?: "unknown reason"}", info)
+        }
+        Log.i(TAG, "Install result: success=$success message=$message")
     }
 }

@@ -218,7 +218,7 @@ fun SettingsScreen(graph: Graph, onBack: () -> Unit, onOpenReport: () -> Unit = 
                 SettingRow(
                     title = UpdateUi.buttonLabel(update) ?: "Check for updates",
                     value = UpdateUi.statusText(update),
-                    enabled = update !is UpdateState.Downloading && update != UpdateState.Checking,
+                    enabled = update !is UpdateState.Downloading && update !is UpdateState.Installing && update != UpdateState.Checking,
                 ) { UpdateUi.act(context, graph, update) }
             }
             item {

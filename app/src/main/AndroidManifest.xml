@@ -40,6 +40,10 @@
             android:launchMode="singleTop"
             android:theme="@style/Theme.F1Debrid.Player" />
 
+        <receiver
+            android:name=".update.InstallResultReceiver"
+            android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

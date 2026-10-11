@@ -73,7 +73,7 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
             UpdateUi.buttonLabel(update)?.let { label ->
                 Button(
                     onClick = { UpdateUi.act(context, graph, update) },
-                    enabled = update !is UpdateState.Downloading,
+                    enabled = update !is UpdateState.Downloading && update !is UpdateState.Installing && update !is UpdateState.Installed,
                 ) { Text(label) }
             }
             Button(onClick = { graph.sync.requestSync("manual") }, enabled = !sync.running) {

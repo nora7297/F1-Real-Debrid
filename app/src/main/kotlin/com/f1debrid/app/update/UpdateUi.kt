@@ -10,6 +10,8 @@ object UpdateUi {
         is UpdateState.Downloading -> "Downloading ${state.percent}%"
         is UpdateState.ReadyToInstall -> "Install build ${state.info.versionCode}"
         is UpdateState.NeedsPermission -> "Install build ${state.info.versionCode}"
+        is UpdateState.Installing -> "Installing…"
+        is UpdateState.Installed -> "Installed – reopen the app"
         is UpdateState.Error -> if (state.info != null) "Retry update" else "Retry update check"
         else -> null
     }
@@ -23,6 +25,8 @@ object UpdateUi {
         is UpdateState.ReadyToInstall -> "Downloaded – press to install build ${state.info.versionCode}"
         is UpdateState.NeedsPermission ->
             "Allow F1 Replays to install apps in the settings screen that opened, then press Install again"
+        is UpdateState.Installing -> "Installing build ${state.info.versionCode}… confirm the system dialog if it appears"
+        is UpdateState.Installed -> "Build ${state.info.versionCode} installed. Close and reopen the app to use it."
         is UpdateState.Error -> state.message
     }
 
@@ -32,7 +36,7 @@ object UpdateUi {
             is UpdateState.ReadyToInstall -> graph.updater.install(context, state.info, state.file)
             is UpdateState.NeedsPermission -> graph.updater.install(context, state.info, state.file)
             is UpdateState.Error -> if (state.info != null) graph.updater.download(state.info) else graph.updater.check()
-            is UpdateState.Downloading, UpdateState.Checking -> Unit
+            is UpdateState.Downloading, is UpdateState.Installing, is UpdateState.Installed, UpdateState.Checking -> Unit
             UpdateState.Idle, UpdateState.UpToDate -> graph.updater.check()
         }
     }
