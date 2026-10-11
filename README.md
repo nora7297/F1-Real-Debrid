@@ -93,6 +93,13 @@ one, and finally the subreddit's RSS feed, which Reddit keeps open for feed read
 worked last is tried first next time. If every route fails, the home screen shows the HTTP status
 each one returned.
 
+Anonymous access is tight: Reddit allows only a handful of requests per minute per address, so
+without a client ID the sync usually gets one page of 100 posts and few comment look-ups before it
+has to back off. Creating an *installed app* at https://www.reddit.com/prefs/apps takes two minutes
+(name: anything, type: *installed app*, redirect URI: `http://localhost:8080`); the client ID is the
+short string shown under the app's name. Enter it under *Settings → Reddit app client ID* and the
+app switches to the official API with a generous limit.
+
 ## How playback works
 
 A Real-Debrid torrent that is already cached finishes in a couple of seconds; one that is not is

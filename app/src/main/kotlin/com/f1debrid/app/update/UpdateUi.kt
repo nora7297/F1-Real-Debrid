@@ -35,7 +35,7 @@ object UpdateUi {
             is UpdateState.Available -> graph.updater.download(state.info)
             is UpdateState.ReadyToInstall -> graph.updater.install(context, state.info, state.file)
             is UpdateState.NeedsPermission -> graph.updater.install(context, state.info, state.file)
-            is UpdateState.Error -> if (state.info != null) graph.updater.download(state.info) else graph.updater.check()
+            is UpdateState.Error -> if (state.info != null) graph.updater.retry() else graph.updater.check()
             is UpdateState.Downloading, is UpdateState.Installing, is UpdateState.Installed, UpdateState.Checking -> Unit
             UpdateState.Idle, UpdateState.UpToDate -> graph.updater.check()
         }

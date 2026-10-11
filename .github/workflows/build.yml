@@ -54,7 +54,7 @@ jobs:
           {
             "versionCode": ${{ github.run_number }},
             "versionName": "0.1.${{ github.run_number }}",
-            "apk": "https://github.com/${{ github.repository }}/releases/download/$TAG/F1-Replays.apk",
+            "apk": "https://github.com/${{ github.repository }}/releases/download/$TAG/F1-Replays-${{ github.run_number }}.apk",
             "sha256": "$SHA256",
             "built": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "commit": "${{ github.sha }}"

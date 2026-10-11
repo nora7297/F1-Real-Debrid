@@ -85,15 +85,7 @@ class Updater(
         if (current is UpdateState.Downloading || current is UpdateState.Checking) return
         _state.value = UpdateState.Checking
         try {
-            val body = withContext(Dispatchers.IO) {
-                val req = Request.Builder().url(VERSION_URL).header("Cache-Control", "no-cache").build()
-                http.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
-                    resp.body?.string().orEmpty()
-                }
-            }
-            val info = json.decodeFromString(UpdateInfo.serializer(), body)
-            lastCheckAt = System.currentTimeMillis()
+            val info = fetchInfo()
             _state.value = if (info.versionCode > BuildConfig.VERSION_CODE) UpdateState.Available(info) else UpdateState.UpToDate
             Log.i(TAG, "Update check: latest build ${info.versionCode}, running ${BuildConfig.VERSION_CODE}")
         } catch (e: Exception) {
@@ -102,11 +94,32 @@ class Updater(
         }
     }
 
+    private suspend fun fetchInfo(): UpdateInfo {
+        val body = withContext(Dispatchers.IO) {
+            val req = Request.Builder().url(VERSION_URL).header("Cache-Control", "no-cache").build()
+            http.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+                resp.body?.string().orEmpty()
+            }
+        }
+        val info = json.decodeFromString(UpdateInfo.serializer(), body)
+        lastCheckAt = System.currentTimeMillis()
+        return info
+    }
+
     fun download(info: UpdateInfo) {
         scope.launch { downloadNow(info) }
     }
 
-    suspend fun downloadNow(info: UpdateInfo) {
+    /** Re-reads the version file and downloads whatever is current (used by "Retry update"). */
+    fun retry() {
+        scope.launch {
+            checkNow()
+            (_state.value as? UpdateState.Available)?.let { downloadNow(it.info) }
+        }
+    }
+
+    suspend fun downloadNow(info: UpdateInfo, refreshOnFailure: Boolean = true) {
         if (_state.value is UpdateState.Downloading) return
         _state.value = UpdateState.Downloading(info, 0)
         try {
@@ -150,6 +163,14 @@ class Updater(
         } catch (e: Exception) {
             Log.w(TAG, "Update download failed", e)
             _state.value = UpdateState.Error("Download failed: ${e.message}", info)
+            if (refreshOnFailure) {
+                // The release may have been replaced by a newer build since the check: re-read and try once more.
+                val fresh = runCatching { fetchInfo() }.getOrNull() ?: return
+                if (fresh.versionCode > BuildConfig.VERSION_CODE && (fresh.apk != info.apk || fresh.sha256 != info.sha256)) {
+                    Log.i(TAG, "Version file changed (build ${fresh.versionCode}); retrying download")
+                    downloadNow(fresh, refreshOnFailure = false)
+                }
+            }
         }
     }
 

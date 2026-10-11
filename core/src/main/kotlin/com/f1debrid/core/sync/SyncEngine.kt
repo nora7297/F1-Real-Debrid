@@ -11,6 +11,7 @@ import com.f1debrid.core.rd.RdApiException
 import com.f1debrid.core.rd.RdStatus
 import com.f1debrid.core.rd.RdTorrentFile
 import com.f1debrid.core.rd.RealDebridClient
+import com.f1debrid.core.reddit.RateLimitedException
 import com.f1debrid.core.reddit.RedditPost
 import com.f1debrid.core.reddit.RedditSource
 import kotlinx.coroutines.delay
@@ -128,7 +129,10 @@ class SyncEngine(
             for (m in magnets) candidates += candidate(post, parsed, m, useContext)
         }
         if (commentFailures > 0) {
-            errors += "Could not read the comments of $commentFailures post(s), will retry next sync: ${lastCommentError?.take(200)}"
+            val hint = if (lastCommentError?.contains("rate limit", ignoreCase = true) == true) {
+                " Tip: a Reddit app client ID (Settings) removes this limit."
+            } else ""
+            errors += "Could not read the comments of $commentFailures post(s), will retry next sync: ${lastCommentError?.take(200)}$hint"
         }
         log("${candidates.size} magnet candidates from $f1Posts F1 posts")
 
@@ -236,7 +240,10 @@ class SyncEngine(
             val result = try {
                 reddit.fetchNew(s.subreddit, s.pageSize, after)
             } catch (e: Exception) {
-                if (page == 0) errors += "Reddit: ${e.message}"
+                if (page == 0) {
+                    val hint = if (e is RateLimitedException) " Tip: a Reddit app client ID (Settings) removes this limit." else ""
+                    errors += "Reddit: ${e.message}$hint"
+                }
                 else log("Stopped paging after ${out.size} posts: ${e.message}")
                 break
             }

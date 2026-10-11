@@ -147,3 +147,41 @@ class RedditClientPacingTest {
         assertEquals("Blocked", text)
     }
 }
+
+
+class RedditClientCooldownTest {
+    @Test
+    fun a429WithoutRetryAfterStartsACooldown() {
+        kotlinx.coroutines.test.runTest {
+            val server = MockWebServer()
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse =
+                    MockResponse().setResponseCode(429).setBody("<html><body>Too many requests</body></html>")
+            }
+            server.start()
+            try {
+                var now = 5_000_000L
+                val base = server.url("/").toString().trimEnd('/')
+                val client = RedditClient(
+                    OkHttpClient(), "test-agent", hosts = listOf("$base/www"),
+                    minIntervalMs = 0, sleep = { ms -> now += ms }, clock = { now },
+                )
+                val first = assertFailsWith<IOException> { client.fetchNew("MotorsportsReplays", 100, null) }
+                assertTrue(first.message.orEmpty().contains("rate limit"), first.message)
+                // Only one route was tried: the rest were skipped once the budget was known to be gone.
+                assertEquals(1, server.requestCount)
+
+                // Inside the cool-down nothing touches the network.
+                assertFailsWith<IOException> { client.fetchCommentBodies("/r/x/comments/y/z/") }
+                assertEquals(1, server.requestCount)
+
+                // After the cool-down requests flow again.
+                now += 61_000
+                assertFailsWith<IOException> { client.fetchNew("MotorsportsReplays", 100, null) }
+                assertEquals(2, server.requestCount)
+            } finally {
+                server.shutdown()
+            }
+        }
+    }
+}

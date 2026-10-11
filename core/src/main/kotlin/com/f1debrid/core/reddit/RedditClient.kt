@@ -20,7 +20,8 @@ interface RedditSource {
     suspend fun fetchCommentBodies(permalink: String): List<String>
 }
 
-class RateLimitedException(val retryAfterMs: Long) : IOException("HTTP 429 (rate limited, retry in ${retryAfterMs / 1000}s)")
+class RateLimitedException(val retryAfterMs: Long) :
+    IOException("Reddit rate limit hit, anonymous access allows only a few requests per minute; cooling down ${retryAfterMs / 1000}s")
 
 /**
  * Reads a subreddit without needing a Reddit account, trying several routes in order until one works:
@@ -53,7 +54,8 @@ class RedditClient(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
         private const val INSTALLED_CLIENT_GRANT = "https://oauth.reddit.com/grants/installed_client"
         private const val DEAD_ROUTE_MS = 10 * 60_000L
-        private const val MAX_429_RETRIES = 2
+        private const val MAX_429_RETRIES = 1
+        private const val ANON_COOLDOWN_MS = 60_000L
     }
 
     private enum class Mode { OAUTH, JSON, RSS }
@@ -71,6 +73,7 @@ class RedditClient(
     private val deadUntil = HashMap<Attempt, Long>()
     private val throttleMutex = Mutex()
     private var nextAllowedAt = 0L
+    @Volatile private var anonymousCooldownUntil = 0L
 
     override suspend fun fetchNew(subreddit: String, limit: Int, after: String?): RedditPage {
         val lim = limit.coerceIn(1, 100)
@@ -121,8 +124,9 @@ class RedditClient(
                 preferred = attempt
                 return result
             } catch (e: RateLimitedException) {
-                markDead(attempt, e.retryAfterMs)
+                // Every anonymous route shares the same budget, so trying the others is pointless.
                 errors += "${attempt.label}: ${e.message}"
+                break
             } catch (e: Exception) {
                 markDead(attempt, DEAD_ROUTE_MS)
                 errors += "${attempt.label}: ${e.message ?: e.javaClass.simpleName}"
@@ -187,8 +191,13 @@ class RedditClient(
         t
     }
 
-    /** Anonymous GET: paced, and retried after the delay Reddit asks for on a 429. */
+    /**
+     * Anonymous GET: paced; a 429 with a short Retry-After is retried once, any other 429 puts all
+     * anonymous routes into a cool-down so the rest of the sync does not burn the remaining budget.
+     */
     private suspend fun get(url: String, ua: String, accept: String): String {
+        val remaining = anonymousCooldownUntil - clock()
+        if (remaining > 0) throw RateLimitedException(remaining)
         val req = Request.Builder().url(url).header("User-Agent", ua).header("Accept", accept).build()
         var tries = 0
         while (true) {
@@ -196,12 +205,14 @@ class RedditClient(
             val result = throttled { execute(req) }
             if (result.code in 200..299) return result.body
             if (result.code == 429) {
-                val wait = (result.retryAfterMs ?: 6_000L).coerceIn(1_000L, 60_000L)
-                if (tries <= MAX_429_RETRIES) {
-                    sleep(wait)
+                val retryAfter = result.retryAfterMs
+                if (retryAfter != null && retryAfter <= 30_000L && tries <= MAX_429_RETRIES) {
+                    sleep(retryAfter.coerceAtLeast(1_000L))
                     continue
                 }
-                throw RateLimitedException(wait)
+                val cooldown = retryAfter?.coerceIn(5_000L, 10 * 60_000L) ?: ANON_COOLDOWN_MS
+                anonymousCooldownUntil = clock() + cooldown
+                throw RateLimitedException(cooldown)
             }
             throw IOException("HTTP ${result.code} ${snippet(result.body)}")
         }
