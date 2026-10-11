@@ -83,7 +83,10 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
         },
     ) {
         if (firstError != null && !sync.running) {
-            InfoText("Last sync problem: $firstError", color = MaterialTheme.colorScheme.error)
+            val more = (sync.lastReport?.errors?.size ?: 0) - 1
+            val shown = if (firstError.length > 220) firstError.take(220) + "…" else firstError
+            val suffix = if (more > 0) " (+$more more – see Settings → Last sync report)" else " (details in Settings → Last sync report)"
+            InfoText("Last sync problem: $shown$suffix", color = MaterialTheme.colorScheme.error)
             Spacer(modifier = Modifier.height(8.dp))
         }
         if (update is UpdateState.NeedsPermission || (update is UpdateState.Error && (update as UpdateState.Error).info != null)) {

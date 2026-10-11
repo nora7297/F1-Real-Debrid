@@ -24,7 +24,8 @@ object Naming {
     }
 
     fun entryTitle(e: CatalogEntry): String = buildString {
-        append(e.sessionLabel)
+        val videos = e.files.count { it.isVideo && it.selected && !isSample(it.path) }
+        append(if (e.sessions.isEmpty() && videos >= 2) "Weekend pack ($videos files)" else e.sessionLabel)
         if (e.quality != Quality.UNKNOWN) append(" · ").append(e.quality.label)
         e.broadcaster?.let { append(" · ").append(it) }
     }

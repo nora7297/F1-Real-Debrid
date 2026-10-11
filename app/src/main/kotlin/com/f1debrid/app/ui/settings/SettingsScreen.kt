@@ -51,7 +51,7 @@ private val LOOKBACK_OPTIONS = listOf(7, 14, 21, 30, 60)
 private val INTERVAL_OPTIONS = listOf(3, 6, 12, 24)
 
 @Composable
-fun SettingsScreen(graph: Graph, onBack: () -> Unit) {
+fun SettingsScreen(graph: Graph, onBack: () -> Unit, onOpenReport: () -> Unit = {}) {
     val settings by graph.prefs.settings.collectAsState()
     val tokens by graph.prefs.tokens.collectAsState()
     val catalog by graph.catalogStore.catalog.collectAsState()
@@ -169,6 +169,14 @@ fun SettingsScreen(graph: Graph, onBack: () -> Unit) {
             }
 
             item { SectionHeader("Account & data") }
+            item {
+                val problems = graph.sync.state.value.lastReport?.errors?.size ?: 0
+                SettingRow(
+                    "Last sync report",
+                    if (problems == 0) "What the last sync did, and the titles of every release in the library"
+                    else "$problems problem(s) reported – press to read them",
+                ) { onOpenReport() }
+            }
             item {
                 SettingRow(
                     "Real-Debrid",

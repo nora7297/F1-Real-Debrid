@@ -89,3 +89,61 @@ class RedditClientTest {
         assertTrue(tokenRequest.body.readUtf8().contains("grant_type=https%3A%2F%2Foauth.reddit.com%2Fgrants%2Finstalled_client"))
     }
 }
+
+class RedditClientPacingTest {
+    private val feed = RssFixtures.listing
+
+    @Test
+    fun retriesAfter429AndSkipsDeadRoutes() {
+        kotlinx.coroutines.test.runTest {
+            val server = MockWebServer()
+            var rssCalls = 0
+            var jsonCalls = 0
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val path = request.path.orEmpty()
+                    return when {
+                        path.contains(".json") -> { jsonCalls++; MockResponse().setResponseCode(403).setBody("<html><head><style>.x{}</style></head><body>Blocked</body></html>") }
+                        path.contains(".rss") -> {
+                            rssCalls++
+                            if (rssCalls == 1) MockResponse().setResponseCode(429).setHeader("Retry-After", "1").setBody("too many")
+                            else MockResponse().setBody(feed)
+                        }
+                        else -> MockResponse().setResponseCode(404)
+                    }
+                }
+            }
+            server.start()
+            try {
+                val sleeps = ArrayList<Long>()
+                var now = 1_000_000L
+                val base = server.url("/").toString().trimEnd('/')
+                val client = RedditClient(
+                    OkHttpClient(), "test-agent", hosts = listOf("$base/www"),
+                    minIntervalMs = 2500, sleep = { ms -> sleeps += ms; now += ms }, clock = { now },
+                )
+                val page = client.fetchNew("MotorsportsReplays", 100, null)
+                assertEquals(2, page.posts.size)
+                // JSON (app UA + browser UA) failed hard, RSS got a 429 once and was retried after Retry-After.
+                assertEquals(2, jsonCalls)
+                assertEquals(2, rssCalls)
+                assertTrue(sleeps.contains(1000L), sleeps.toString())
+
+                // Second call: JSON routes are dead for a while, RSS is preferred -> exactly one more RSS request.
+                client.fetchNew("MotorsportsReplays", 100, null)
+                assertEquals(2, jsonCalls)
+                assertEquals(3, rssCalls)
+                // Requests are paced at least minIntervalMs apart.
+                assertTrue(sleeps.any { it in 1L..2500L }, sleeps.toString())
+            } finally {
+                server.shutdown()
+            }
+        }
+    }
+
+    @Test
+    fun errorSnippetsIgnoreStylesheets() {
+        val text = com.f1debrid.core.reddit.RedditRss.htmlToText("<html><head><style>.theme-light{--x:1}</style><script>var a=1;</script></head><body><h1>Blocked</h1></body></html>")
+        assertEquals("Blocked", text)
+    }
+}

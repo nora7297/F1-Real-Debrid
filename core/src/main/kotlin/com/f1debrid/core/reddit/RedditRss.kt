@@ -14,6 +14,7 @@ object RedditRss {
     private val ANCHOR = Regex("""<a\s[^>]*href="([^"]+)"[^>]*>""", RegexOption.IGNORE_CASE)
     private val BLOCK_END = Regex("""<br\s*/?>|</p>|</li>|</div>|</h\d>|</tr>""", RegexOption.IGNORE_CASE)
     private val TAG = Regex("""<[^>]+>""")
+    private val INVISIBLE = Regex("""<(style|script|head)\b[^>]*>.*?</\1>""", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
     private val ENTITY = Regex("""&(#x[0-9a-fA-F]+|#\d+|lt|gt|quot|apos|amp|nbsp);""")
     private val ISO = Regex("""(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?""")
 
@@ -59,7 +60,8 @@ object RedditRss {
 
     /** Turns rendered post HTML into plain text, keeping link targets so magnet hrefs survive. */
     fun htmlToText(html: String): String {
-        var s = ANCHOR.replace(html) { m -> " " + m.groupValues[1] + " " }
+        var s = INVISIBLE.replace(html, " ")
+        s = ANCHOR.replace(s) { m -> " " + m.groupValues[1] + " " }
         s = BLOCK_END.replace(s, "\n")
         s = TAG.replace(s, " ")
         return unescape(s).lines().joinToString("\n") { it.trim() }.trim()

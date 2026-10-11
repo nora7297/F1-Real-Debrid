@@ -25,7 +25,7 @@ data class SyncSettings(
     val enabledSessions: Set<SessionType> = DEFAULT_SESSIONS,
     val maxNewPerSync: Int = 20,
     val fetchComments: Boolean = true,
-    val maxCommentFetches: Int = 8,
+    val maxCommentFetches: Int = 5,
     val includeUnknownQuality: Boolean = false,
 ) {
     companion object {
@@ -99,6 +99,8 @@ class SyncEngine(
 
         val commentsChecked = catalog.commentsChecked.toMutableMap()
         var commentFetches = 0
+        var commentFailures = 0
+        var lastCommentError: String? = null
         val candidates = ArrayList<Candidate>()
         var f1Posts = 0
         for (post in posts) {
@@ -116,11 +118,17 @@ class SyncEngine(
                     magnets = reddit.fetchCommentBodies(post.permalink).flatMap { Magnets.extract(it) }.distinctBy { it.infoHash }
                     commentsChecked[post.id] = startedAt
                 } catch (e: Exception) {
-                    errors += "Comments for ${post.id}: ${e.message}"
+                    commentFailures++
+                    lastCommentError = e.message
+                    // Reddit is usually rate-limiting at this point; stop spending requests on comments this run.
+                    commentFetches = s.maxCommentFetches
                 }
             }
             val useContext = magnets.size > 1
             for (m in magnets) candidates += candidate(post, parsed, m, useContext)
+        }
+        if (commentFailures > 0) {
+            errors += "Could not read the comments of $commentFailures post(s), will retry next sync: ${lastCommentError?.take(200)}"
         }
         log("${candidates.size} magnet candidates from $f1Posts F1 posts")
 
@@ -228,7 +236,8 @@ class SyncEngine(
             val result = try {
                 reddit.fetchNew(s.subreddit, s.pageSize, after)
             } catch (e: Exception) {
-                errors += "Reddit: ${e.message}"
+                if (page == 0) errors += "Reddit: ${e.message}"
+                else log("Stopped paging after ${out.size} posts: ${e.message}")
                 break
             }
             val recent = result.posts.filter { it.createdMillis >= cutoff }

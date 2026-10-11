@@ -20,6 +20,7 @@ import com.f1debrid.app.Graph
 import com.f1debrid.app.ui.details.DetailsScreen
 import com.f1debrid.app.ui.home.HomeScreen
 import com.f1debrid.app.ui.login.LoginScreen
+import com.f1debrid.app.ui.report.SyncReportScreen
 import com.f1debrid.app.ui.settings.SettingsScreen
 import com.f1debrid.app.ui.theme.F1DebridTheme
 
@@ -46,6 +47,7 @@ class MainActivity : ComponentActivity() {
 sealed interface Screen {
     data object Home : Screen
     data object Settings : Screen
+    data object Report : Screen
     data class Details(val hash: String) : Screen
 }
 
@@ -61,7 +63,8 @@ fun AppRoot(graph: Graph) {
         when {
             !loggedIn -> LoginScreen(graph)
             screen is Screen.Details -> DetailsScreen(graph, (screen as Screen.Details).hash, onBack = { screen = Screen.Home })
-            screen == Screen.Settings -> SettingsScreen(graph, onBack = { screen = Screen.Home })
+            screen == Screen.Settings -> SettingsScreen(graph, onBack = { screen = Screen.Home }, onOpenReport = { screen = Screen.Report })
+            screen == Screen.Report -> SyncReportScreen(graph, onBack = { screen = Screen.Settings })
             else -> HomeScreen(
                 graph = graph,
                 onOpen = { hash -> screen = Screen.Details(hash) },

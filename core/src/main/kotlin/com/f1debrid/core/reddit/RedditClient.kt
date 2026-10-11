@@ -1,6 +1,7 @@
 package com.f1debrid.core.reddit
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -19,15 +20,19 @@ interface RedditSource {
     suspend fun fetchCommentBodies(permalink: String): List<String>
 }
 
+class RateLimitedException(val retryAfterMs: Long) : IOException("HTTP 429 (rate limited, retry in ${retryAfterMs / 1000}s)")
+
 /**
  * Reads a subreddit without needing a Reddit account, trying several routes in order until one works:
  *
  * 1. Reddit's official OAuth API, if the user has entered a client id of their own "installed app"
- *    (https://www.reddit.com/prefs/apps). This is the route Reddit never blocks.
- * 2. The public JSON listing on a few hosts, with the app's own User-Agent and then a browser one.
+ *    (https://www.reddit.com/prefs/apps). This is the route Reddit never blocks or throttles hard.
+ * 2. The public JSON listing, with the app's own User-Agent and then a browser one.
  * 3. The Atom/RSS feed, which Reddit keeps open for feed readers.
  *
- * The route that last succeeded is tried first next time.
+ * Anonymous requests are paced (Reddit allows only a few per minute), a 429 is retried after the
+ * delay Reddit asks for, routes that fail hard are skipped for a while, and the route that last
+ * succeeded is tried first next time.
  */
 class RedditClient(
     private val http: OkHttpClient,
@@ -37,23 +42,35 @@ class RedditClient(
     private val deviceId: String = UUID.randomUUID().toString().replace("-", "").take(30),
     private val oauthBase: String = "https://oauth.reddit.com",
     private val tokenUrl: String = "https://www.reddit.com/api/v1/access_token",
+    private val minIntervalMs: Long = 2500,
+    private val sleep: suspend (Long) -> Unit = { delay(it) },
+    private val clock: () -> Long = { System.currentTimeMillis() },
 ) : RedditSource {
 
     companion object {
-        val DEFAULT_HOSTS = listOf("https://www.reddit.com", "https://old.reddit.com", "https://api.reddit.com")
+        val DEFAULT_HOSTS = listOf("https://www.reddit.com")
         const val BROWSER_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
         private const val INSTALLED_CLIENT_GRANT = "https://oauth.reddit.com/grants/installed_client"
+        private const val DEAD_ROUTE_MS = 10 * 60_000L
+        private const val MAX_429_RETRIES = 2
     }
 
     private enum class Mode { OAUTH, JSON, RSS }
     private data class Attempt(val mode: Mode, val host: String, val ua: String) {
-        val label: String get() = mode.name.lowercase() + " " + host.removePrefix("https://").removePrefix("http://")
+        val label: String
+            get() = mode.name.lowercase() + " " + host.removePrefix("https://").removePrefix("http://") +
+                if (ua == BROWSER_UA) " (browser)" else ""
     }
+
+    private class HttpResult(val code: Int, val body: String, val retryAfterMs: Long?)
 
     @Volatile private var preferred: Attempt? = null
     @Volatile private var token: Pair<String, Long>? = null
     private val tokenMutex = Mutex()
+    private val deadUntil = HashMap<Attempt, Long>()
+    private val throttleMutex = Mutex()
+    private var nextAllowedAt = 0L
 
     override suspend fun fetchNew(subreddit: String, limit: Int, after: String?): RedditPage {
         val lim = limit.coerceIn(1, 100)
@@ -83,10 +100,17 @@ class RedditClient(
         if (!clientId().isNullOrBlank()) list += Attempt(Mode.OAUTH, oauthBase, userAgent)
         for (h in hosts) list += Attempt(Mode.JSON, h, userAgent)
         list += Attempt(Mode.JSON, hosts.first(), BROWSER_UA)
-        for (h in hosts.take(2)) list += Attempt(Mode.RSS, h, userAgent)
+        for (h in hosts) list += Attempt(Mode.RSS, h, userAgent)
         list += Attempt(Mode.RSS, hosts.first(), BROWSER_UA)
         val p = preferred
-        return if (p != null && p in list) listOf(p) + (list - p) else list
+        val ordered = if (p != null && p in list) listOf(p) + (list - p) else list
+        val now = clock()
+        val alive = synchronized(deadUntil) { ordered.filter { (deadUntil[it] ?: 0L) <= now } }
+        return alive.ifEmpty { ordered }
+    }
+
+    private fun markDead(attempt: Attempt, forMs: Long) {
+        synchronized(deadUntil) { deadUntil[attempt] = clock() + forMs }
     }
 
     private suspend fun <T> tryAll(what: String, block: suspend (Attempt) -> T): T {
@@ -96,7 +120,11 @@ class RedditClient(
                 val result = block(attempt)
                 preferred = attempt
                 return result
+            } catch (e: RateLimitedException) {
+                markDead(attempt, e.retryAfterMs)
+                errors += "${attempt.label}: ${e.message}"
             } catch (e: Exception) {
+                markDead(attempt, DEAD_ROUTE_MS)
                 errors += "${attempt.label}: ${e.message ?: e.javaClass.simpleName}"
             }
         }
@@ -124,20 +152,20 @@ class RedditClient(
                 .header("User-Agent", userAgent)
                 .header("Accept", "application/json")
                 .build()
-            val (code, body) = execute(req)
-            if (code in 200..299) return body
-            if (code == 401 && attempt == 0) {
+            val result = execute(req)
+            if (result.code in 200..299) return result.body
+            if (result.code == 401 && attempt == 0) {
                 token = null
                 bearer = accessToken()
             } else {
-                throw IOException("HTTP $code ${snippet(body)}")
+                throw IOException("HTTP ${result.code} ${snippet(result.body)}")
             }
         }
         throw IOException("unauthorised")
     }
 
     private suspend fun accessToken(): String = tokenMutex.withLock {
-        token?.let { (t, expiresAt) -> if (expiresAt - System.currentTimeMillis() > 60_000) return@withLock t }
+        token?.let { (t, expiresAt) -> if (expiresAt - clock() > 60_000) return@withLock t }
         val id = clientId()?.trim()?.takeIf { it.isNotEmpty() } ?: throw IOException("no Reddit client id")
         val form = FormBody.Builder()
             .add("grant_type", INSTALLED_CLIENT_GRANT)
@@ -148,30 +176,56 @@ class RedditClient(
             .header("User-Agent", userAgent)
             .post(form)
             .build()
-        val (code, body) = execute(req)
-        if (code !in 200..299) throw IOException("token request HTTP $code ${snippet(body)}")
-        val obj = runCatching { RedditJson.json.parseToJsonElement(body).jsonObject }.getOrNull()
+        val result = execute(req)
+        if (result.code !in 200..299) throw IOException("token request HTTP ${result.code} ${snippet(result.body)}")
+        val obj = runCatching { RedditJson.json.parseToJsonElement(result.body).jsonObject }.getOrNull()
             ?: throw IOException("token reply was not JSON")
         val t = obj["access_token"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-            ?: throw IOException("token reply had no access_token ${snippet(body)}")
+            ?: throw IOException("token reply had no access_token ${snippet(result.body)}")
         val expiresIn = obj["expires_in"]?.jsonPrimitive?.longOrNull ?: 3600L
-        token = t to (System.currentTimeMillis() + expiresIn * 1000)
+        token = t to (clock() + expiresIn * 1000)
         t
     }
 
+    /** Anonymous GET: paced, and retried after the delay Reddit asks for on a 429. */
     private suspend fun get(url: String, ua: String, accept: String): String {
         val req = Request.Builder().url(url).header("User-Agent", ua).header("Accept", accept).build()
-        val (code, body) = execute(req)
-        if (code !in 200..299) throw IOException("HTTP $code ${snippet(body)}")
-        return body
+        var tries = 0
+        while (true) {
+            tries++
+            val result = throttled { execute(req) }
+            if (result.code in 200..299) return result.body
+            if (result.code == 429) {
+                val wait = (result.retryAfterMs ?: 6_000L).coerceIn(1_000L, 60_000L)
+                if (tries <= MAX_429_RETRIES) {
+                    sleep(wait)
+                    continue
+                }
+                throw RateLimitedException(wait)
+            }
+            throw IOException("HTTP ${result.code} ${snippet(result.body)}")
+        }
     }
 
-    private suspend fun execute(req: Request): Pair<Int, String> = withContext(Dispatchers.IO) {
-        http.newCall(req).execute().use { resp -> resp.code to (resp.body?.string().orEmpty()) }
+    private suspend fun <T> throttled(block: suspend () -> T): T = throttleMutex.withLock {
+        val wait = nextAllowedAt - clock()
+        if (wait > 0) sleep(wait)
+        try {
+            block()
+        } finally {
+            nextAllowedAt = clock() + minIntervalMs
+        }
+    }
+
+    private suspend fun execute(req: Request): HttpResult = withContext(Dispatchers.IO) {
+        http.newCall(req).execute().use { resp ->
+            val retryAfter = resp.header("Retry-After")?.trim()?.toLongOrNull()?.times(1000)
+            HttpResult(resp.code, resp.body?.string().orEmpty(), retryAfter)
+        }
     }
 
     private fun snippet(body: String): String {
         val text = RedditRss.htmlToText(body).replace(Regex("""\s+"""), " ").trim()
-        return if (text.isEmpty()) "" else "[" + text.take(70) + "]"
+        return if (text.isEmpty()) "" else "[" + text.take(60) + "]"
     }
 }
