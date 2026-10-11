@@ -89,7 +89,7 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
             InfoText("Last sync problem: $shown$suffix", color = MaterialTheme.colorScheme.error)
             Spacer(modifier = Modifier.height(8.dp))
         }
-        if (update is UpdateState.NeedsPermission || (update is UpdateState.Error && (update as UpdateState.Error).info != null)) {
+        if (update is UpdateState.NeedsPermission || update is UpdateState.Error) {
             InfoText(UpdateUi.statusText(update), color = MaterialTheme.colorScheme.error)
             Spacer(modifier = Modifier.height(8.dp))
         }

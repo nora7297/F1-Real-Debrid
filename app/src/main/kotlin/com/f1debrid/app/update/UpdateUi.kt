@@ -10,7 +10,7 @@ object UpdateUi {
         is UpdateState.Downloading -> "Downloading ${state.percent}%"
         is UpdateState.ReadyToInstall -> "Install build ${state.info.versionCode}"
         is UpdateState.NeedsPermission -> "Install build ${state.info.versionCode}"
-        is UpdateState.Error -> if (state.info != null) "Retry update" else null
+        is UpdateState.Error -> if (state.info != null) "Retry update" else "Retry update check"
         else -> null
     }
 
