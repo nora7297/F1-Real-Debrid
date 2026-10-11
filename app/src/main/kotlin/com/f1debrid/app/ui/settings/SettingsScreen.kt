@@ -75,6 +75,17 @@ fun SettingsScreen(graph: Graph, onBack: () -> Unit, onOpenReport: () -> Unit = 
             verticalArrangement = Arrangement.spacedBy(6.dp),
             contentPadding = PaddingValues(bottom = 48.dp),
         ) {
+            item { SectionHeader("Updates") }
+            item {
+                SettingRow("Version", "F1 Replays ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})", enabled = false) {}
+            }
+            item {
+                SettingRow(
+                    title = UpdateUi.buttonLabel(update) ?: "Check for updates",
+                    value = UpdateUi.statusText(update),
+                    enabled = update !is UpdateState.Downloading && update !is UpdateState.Installing && update != UpdateState.Checking,
+                ) { UpdateUi.act(context, graph, update) }
+            }
             item { SectionHeader("What to add") }
             item {
                 SettingRow("Quality", settings.qualityPolicy.label) {
@@ -210,17 +221,7 @@ fun SettingsScreen(graph: Graph, onBack: () -> Unit, onOpenReport: () -> Unit = 
                 }
             }
 
-            item { SectionHeader("About & updates") }
-            item {
-                SettingRow("Version", "F1 Replays ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})", enabled = false) {}
-            }
-            item {
-                SettingRow(
-                    title = UpdateUi.buttonLabel(update) ?: "Check for updates",
-                    value = UpdateUi.statusText(update),
-                    enabled = update !is UpdateState.Downloading && update !is UpdateState.Installing && update != UpdateState.Checking,
-                ) { UpdateUi.act(context, graph, update) }
-            }
+            item { SectionHeader("About") }
             item {
                 InfoText("Scans r/${settings.subreddit} for Formula 1 replays and adds them to Real-Debrid. Source and builds: github.com/nora7297/F1-Real-Debrid")
             }
