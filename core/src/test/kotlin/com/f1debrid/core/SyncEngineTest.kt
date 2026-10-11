@@ -229,6 +229,7 @@ class SyncEngineTest {
         val store = InMemoryCatalogStore()
         val first = engine(reddit, rd, store).sync()
         assertEquals(1, first.errors.size)
+        assertEquals(first.errors, store.catalog.lastSyncErrors)
         val entry = store.catalog.find(hashUhd)!!
         assertNull(entry.rdTorrentId)
         assertEquals(1, entry.addAttempts)
@@ -254,6 +255,29 @@ class SyncEngineTest {
         val report = engine(FakeReddit(listOf(RedditPage(emptyList(), null))), rd, store).sync()
         assertEquals(1, report.updated)
         assertTrue(store.catalog.find(hashUhd)!!.isReady)
+    }
+
+    @Test
+    fun broadcasterIsFilledInFromRealDebridFileNames() = runTest {
+        val entry = CatalogEntry(
+            hash = hashQuali, magnet = magnet(hashQuali), title = "2026 F1 R17: Singapore Grand Prix", postId = "p9",
+            postUrl = "u", eventKey = "2026-singapore", quality = Quality.UHD_2160, sessions = listOf(SessionType.SPRINT_QUALIFYING),
+            rdTorrentId = "x1", rdStatus = "downloaded", rdFilename = "Formula1.2026.R17.Singapore.Sprint.Qualifying.SkyF1UHD.2160p",
+        )
+        val store = InMemoryCatalogStore(Catalog(entries = listOf(entry)))
+        engine(FakeReddit(listOf(RedditPage(emptyList(), null))), FakeRd(), store).sync()
+        assertEquals("Sky Sports F1", store.catalog.find(hashQuali)?.broadcaster)
+    }
+
+    @Test
+    fun perMagnetBroadcasterBeatsThePostTitle() = runTest {
+        val body = "**Sprint F1TV**\n\n${magnet(hashQuali, "F1.2026.R17.Sprint.F1TV.2160p")}\n\n" +
+            "**Sprint Sky**\n\n${magnet(hashUhd, "F1.2026.R17.Sprint.SkyF1UHD.2160p")}"
+        val pack = post("p10", "2026 F1 R17: Singapore Grand Prix Sky 2160p", body)
+        val store = InMemoryCatalogStore()
+        engine(FakeReddit(listOf(RedditPage(listOf(pack), null))), FakeRd(), store).sync()
+        assertEquals("F1TV", store.catalog.find(hashQuali)?.broadcaster)
+        assertEquals("Sky Sports F1", store.catalog.find(hashUhd)?.broadcaster)
     }
 
     @Test

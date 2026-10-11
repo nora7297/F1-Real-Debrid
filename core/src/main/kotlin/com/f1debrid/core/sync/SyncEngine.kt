@@ -192,8 +192,10 @@ class SyncEngine(
         val report = SyncReport(posts.size, f1Posts, candidates.size, added, updated, errors, clock() - startedAt)
         val keepAfter = startedAt - 30L * DAY_MS
         catalog = catalog.copy(
+            entries = catalog.entries.map { it.withDerivedLabels() },
             lastSyncAt = startedAt,
             lastSyncSummary = report.summary,
+            lastSyncErrors = errors.toList(),
             commentsChecked = commentsChecked.filterValues { it > keepAfter },
         )
         store.save(catalog)
@@ -270,7 +272,7 @@ class SyncEngine(
         val year = title.year ?: dn?.year
         val round = title.round ?: dn?.round
         val gp = title.gpName ?: dn?.gpName
-        val broadcaster = title.broadcaster ?: dn?.broadcaster
+        val broadcaster = dn?.broadcaster ?: ctx?.broadcaster ?: title.broadcaster
         val merged = ParsedTitle(true, quality, sessions, year, round, gp, broadcaster)
         return Candidate(post, magnet, quality, sessions, year, round, gp, broadcaster, F1TitleParser.eventKey(merged, post.title))
     }

@@ -113,6 +113,15 @@ class F1TitleParserTest {
     }
 
     @Test
+    fun colonStyleRedditTitle() {
+        val p = F1TitleParser.parse("2026 F1 R17: Singapore Grand Prix")
+        assertTrue(p.isF1)
+        assertEquals(2026, p.year)
+        assertEquals(17, p.round)
+        assertEquals("Singapore", p.gpName)
+    }
+
+    @Test
     fun eventKeyPrefersYearAndName() {
         val a = F1TitleParser.parse("Formula 1 2026 Round 19 United States Grand Prix Race Sky 2160p")
         val b = F1TitleParser.parse("[F1] 2026 United States GP Qualifying F1TV 1080p")

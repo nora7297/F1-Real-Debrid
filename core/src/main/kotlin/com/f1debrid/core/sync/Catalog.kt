@@ -64,6 +64,8 @@ data class Catalog(
     val entries: List<CatalogEntry> = emptyList(),
     val lastSyncAt: Long = 0,
     val lastSyncSummary: String? = null,
+    /** Problems from the last sync, kept so they survive an app restart. */
+    val lastSyncErrors: List<String> = emptyList(),
     /** Post id -> when its comments were last scanned for magnet links. */
     val commentsChecked: Map<String, Long> = emptyMap(),
     /** Releases the user removed; never auto-added again. */
@@ -123,7 +125,24 @@ fun CatalogEntry.withInfo(info: RdTorrentInfo, now: Long): CatalogEntry {
         files = files,
         rdError = null,
         updatedAt = now,
-    )
+    ).withDerivedLabels()
+}
+
+/**
+ * Fills in a missing broadcaster or quality from the torrent and file names Real-Debrid reports.
+ * Useful when one Reddit post holds several magnets that only differ by source (e.g. Sky vs F1TV).
+ */
+fun CatalogEntry.withDerivedLabels(): CatalogEntry {
+    if (broadcaster != null && quality != Quality.UNKNOWN) return this
+    val names = buildList {
+        rdFilename?.let { add(it) }
+        files.filter { it.selected && it.isVideo }.forEach { add(it.name) }
+    }
+    if (names.isEmpty()) return this
+    val parsed = names.map { F1TitleParser.parse(it) }
+    val b = broadcaster ?: parsed.firstNotNullOfOrNull { it.broadcaster }
+    val q = if (quality != Quality.UNKNOWN) quality else parsed.map { it.quality }.firstOrNull { it != Quality.UNKNOWN } ?: quality
+    return if (b == broadcaster && q == quality) this else copy(broadcaster = b, quality = q)
 }
 
 data class EventGroup(

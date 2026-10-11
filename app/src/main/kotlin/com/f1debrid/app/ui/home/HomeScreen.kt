@@ -54,7 +54,8 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
         }
     }
 
-    val firstError = sync.lastError ?: sync.lastReport?.errors?.firstOrNull()
+    val errorList = sync.lastReport?.errors ?: catalog.lastSyncErrors
+    val firstError = sync.lastError ?: errorList.firstOrNull()
     val subtitle = buildString {
         append("v").append(BuildConfig.VERSION_NAME).append(" · ")
         if (sync.message != null) {
@@ -83,7 +84,7 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
         },
     ) {
         if (firstError != null && !sync.running) {
-            val more = (sync.lastReport?.errors?.size ?: 0) - 1
+            val more = if (sync.lastError != null) 0 else errorList.size - 1
             val shown = if (firstError.length > 220) firstError.take(220) + "…" else firstError
             val suffix = if (more > 0) " (+$more more – see Settings → Last sync report)" else " (details in Settings → Last sync report)"
             InfoText("Last sync problem: $shown$suffix", color = MaterialTheme.colorScheme.error)

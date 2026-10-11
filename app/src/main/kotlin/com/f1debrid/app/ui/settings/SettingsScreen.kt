@@ -181,7 +181,7 @@ fun SettingsScreen(graph: Graph, onBack: () -> Unit, onOpenReport: () -> Unit = 
 
             item { SectionHeader("Account & data") }
             item {
-                val problems = graph.sync.state.value.lastReport?.errors?.size ?: 0
+                val problems = graph.sync.state.value.lastReport?.errors?.size ?: catalog.lastSyncErrors.size
                 SettingRow(
                     "Last sync report",
                     if (problems == 0) "What the last sync did, and the titles of every release in the library"

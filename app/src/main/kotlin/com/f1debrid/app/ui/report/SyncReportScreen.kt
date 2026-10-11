@@ -29,6 +29,7 @@ fun SyncReportScreen(graph: Graph, onBack: () -> Unit) {
     val sync by graph.sync.state.collectAsState()
     val catalog by graph.catalogStore.catalog.collectAsState()
     val report = sync.lastReport
+    val errors = report?.errors ?: catalog.lastSyncErrors
     val now = System.currentTimeMillis()
 
     ScreenScaffold(
@@ -48,11 +49,11 @@ fun SyncReportScreen(graph: Graph, onBack: () -> Unit) {
                 )
             }
             sync.lastError?.let { item { ErrorText("Sync stopped with an error: $it") } }
-            if (report == null || report.errors.isEmpty()) {
+            if (errors.isEmpty()) {
                 item { InfoText("No problems reported.") }
             } else {
-                item { SectionHeader("Problems (${report.errors.size})") }
-                itemsIndexed(report.errors) { index, error ->
+                item { SectionHeader("Problems (${errors.size})") }
+                itemsIndexed(errors) { index, error ->
                     ListItem(
                         selected = false,
                         onClick = {},
