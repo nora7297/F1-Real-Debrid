@@ -3,6 +3,7 @@ package com.f1debrid.app.player
 import android.graphics.Color
 import android.os.Bundle
 import android.view.KeyEvent
+import android.view.View
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -19,6 +20,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
 import com.f1debrid.app.F1DebridApp
 
@@ -30,6 +32,9 @@ class PlayerActivity : ComponentActivity() {
         const val EXTRA_URL = "url"
         const val EXTRA_TITLE = "title"
         const val EXTRA_RESUME_KEY = "resume_key"
+
+        /** How far one left/right press moves when scrubbing with the seek bar. */
+        const val SCRUB_STEP_MS = 2 * 60_000L
     }
 
     private lateinit var playerView: PlayerView
@@ -60,6 +65,10 @@ class PlayerActivity : ComponentActivity() {
             keepScreenOn = true
         }
         setContentView(playerView)
+        // By default each D-pad press on the seek bar jumps 1/20 of the video (about 10 minutes on a
+        // full race broadcast). Use a fixed step instead.
+        (playerView.findViewById<View>(androidx.media3.ui.R.id.exo_progress) as? DefaultTimeBar)
+            ?.setKeyTimeIncrement(SCRUB_STEP_MS)
         hideSystemUi()
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
