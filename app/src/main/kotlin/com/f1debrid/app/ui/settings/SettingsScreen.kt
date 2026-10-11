@@ -123,7 +123,7 @@ fun SettingsScreen(graph: Graph, onBack: () -> Unit, onOpenReport: () -> Unit = 
                 }
             }
             item {
-                SettingRow("Background sync", "Every ${settings.syncIntervalHours} hours while closed · every 2 minutes while the app is open") {
+                SettingRow("Background sync", "Every ${settings.syncIntervalHours} hours (plus every time the app opens)") {
                     update { it.copy(syncIntervalHours = next(INTERVAL_OPTIONS, it.syncIntervalHours)) }
                     SyncScheduler.schedule(context, graph.prefs.settings.value.syncIntervalHours)
                 }

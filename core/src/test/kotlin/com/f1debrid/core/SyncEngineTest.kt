@@ -281,17 +281,6 @@ class SyncEngineTest {
     }
 
     @Test
-    fun quickSyncReadsOnlyTheNewestPage() = runTest {
-        val page1 = RedditPage(listOf(uhdRace), "1")
-        val page2 = RedditPage(listOf(fhdQuali), null)
-        val store = InMemoryCatalogStore()
-        val report = engine(FakeReddit(listOf(page1, page2)), FakeRd(), store, SyncSettings(qualityPolicy = QualityPolicy.BOTH))
-            .sync(quick = true)
-        assertEquals(1, report.scannedPosts)
-        assertEquals(setOf(hashUhd), store.catalog.entries.map { it.hash }.toSet())
-    }
-
-    @Test
     fun pagesUntilLookbackReached() = runTest {
         val page1 = RedditPage(listOf(uhdRace), "1")
         val page2 = RedditPage(listOf(fhdQuali, old), "2")

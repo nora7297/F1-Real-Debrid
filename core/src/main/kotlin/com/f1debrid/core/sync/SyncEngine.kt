@@ -86,12 +86,8 @@ class SyncEngine(
             get() = listOfNotNull(gpName?.let { "$it GP" }, SessionType.labelOf(sessions), quality.label).joinToString(" · ")
     }
 
-    /**
-     * @param quick read only the newest page of posts and do fewer comment look-ups; used for the
-     *   frequent refreshes while the app is open, to stay inside Reddit's anonymous rate limit.
-     */
-    suspend fun sync(quick: Boolean = false, onProgress: suspend (String) -> Unit = {}): SyncReport {
-        val s = settings().let { if (quick) it.copy(maxPages = 1, maxCommentFetches = minOf(it.maxCommentFetches, 2)) else it }
+    suspend fun sync(onProgress: suspend (String) -> Unit = {}): SyncReport {
+        val s = settings()
         val startedAt = clock()
         val errors = ArrayList<String>()
         var catalog = store.load()

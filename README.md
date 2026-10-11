@@ -10,8 +10,8 @@ A small Android TV app (NVIDIA Shield, Fire TV Stick, any Android TV box) that a
 5. Every release shows up in the app grouped by Grand Prix and session (Race, Qualifying, Sprint …).
    Press **OK** on one and it plays – in the built-in player or in Kodi / VLC / MX Player.
 
-Steps 1–4 run **automatically in the background** (every 6 hours by default), when you open the app,
-and every 2 minutes while it is on screen, so the links are normally already there when you sit down to watch.
+Steps 1–4 run **automatically in the background** (every 6 hours by default) and again every time
+you open the app, so the links are normally already there when you sit down to watch.
 
 ## Installing
 
@@ -77,7 +77,7 @@ https://real-debrid.com/apitoken.
 | Quality | 4K preferred | `4K preferred` adds 1080p only when no 4K post exists for that session (and still adds the 4K one later if it shows up). Other options: both, 4K only, 1080p only. |
 | Sessions | Race, Qualifying, Sprint, Sprint Qualifying, full weekend packs | Which sessions are added automatically. Practice and pre/post-race shows can be switched on. |
 | Look back | 21 days | How far back in the subreddit to scan. |
-| Background sync | every 6 h | Interval of the WorkManager job while the app is closed. While the app is on screen it refreshes every 2 minutes (newest page of posts only), pausing during playback. |
+| Background sync | every 6 h | Interval of the WorkManager job (also runs on app open if the last sync is older than 15 min). |
 | Player | Built-in | Built-in ExoPlayer, an external player via the system "Play with…" chooser, or ask every time. |
 | Read comments | on | Look in the comments of F1 posts that have no magnet in the body. |
 | Reddit app client ID | empty | Optional. If Reddit keeps blocking the sync, create an *installed app* at https://www.reddit.com/prefs/apps and enter its client ID here; the app then uses Reddit's official API, which is never blocked. |
