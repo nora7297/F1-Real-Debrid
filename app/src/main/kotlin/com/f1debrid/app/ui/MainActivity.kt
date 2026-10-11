@@ -23,9 +23,22 @@ import com.f1debrid.app.ui.login.LoginScreen
 import com.f1debrid.app.ui.report.SyncReportScreen
 import com.f1debrid.app.ui.settings.SettingsScreen
 import com.f1debrid.app.ui.theme.F1DebridTheme
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val graph: Graph get() = (application as F1DebridApp).graph
+    private var autoRefresh: Job? = null
+
+    private companion object {
+        /** How often the library refreshes while the app is on screen. */
+        const val AUTO_REFRESH_MS = 2 * 60_000L
+
+        /** After this long without a sync, opening the app runs a full (multi-page) sync. */
+        const val FULL_SYNC_AFTER_MS = 6 * 3_600_000L
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,9 +51,25 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Refresh when the app is opened, unless a sync ran very recently.
-        graph.sync.syncIfStale(maxAgeMs = 15 * 60_000L, reason = "app opened")
+        // Refresh when the app is opened, unless a sync ran in the last couple of minutes.
+        val quick = graph.sync.msSinceLastSync() < FULL_SYNC_AFTER_MS
+        graph.sync.syncIfStale(maxAgeMs = AUTO_REFRESH_MS, reason = "app opened", quick = quick)
         graph.updater.checkIfStale(maxAgeMs = 10 * 60_000L)
+
+        // Keep refreshing while the app is on screen; stops when it is paused (e.g. a video is playing).
+        autoRefresh?.cancel()
+        autoRefresh = graph.scope.launch {
+            while (isActive) {
+                delay(20_000)
+                graph.sync.syncIfStale(maxAgeMs = AUTO_REFRESH_MS, reason = "auto-refresh", quick = true)
+            }
+        }
+    }
+
+    override fun onPause() {
+        autoRefresh?.cancel()
+        autoRefresh = null
+        super.onPause()
     }
 }
 

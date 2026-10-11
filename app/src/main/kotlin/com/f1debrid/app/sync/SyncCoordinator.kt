@@ -31,13 +31,13 @@ class SyncCoordinator(
     val state: StateFlow<State> = _state
     private val mutex = Mutex()
 
-    suspend fun runSync(reason: String): SyncReport? {
+    suspend fun runSync(reason: String, quick: Boolean = false): SyncReport? {
         if (!session.isLoggedIn) return null
         if (!mutex.tryLock()) return null
         try {
             Log.i(TAG, "Sync started ($reason)")
             _state.update { it.copy(running = true, message = "Starting sync…", lastError = null) }
-            val report = engine.sync { msg -> _state.update { it.copy(message = msg) } }
+            val report = engine.sync(quick = quick) { msg -> _state.update { it.copy(message = msg) } }
             _state.update { it.copy(running = false, message = null, lastReport = report, lastRunAt = System.currentTimeMillis()) }
             Log.i(TAG, "Sync finished: ${report.summary}")
             report.errors.forEach { Log.w(TAG, "Sync error: $it") }
@@ -53,13 +53,17 @@ class SyncCoordinator(
         }
     }
 
-    fun requestSync(reason: String) {
-        scope.launch { runSync(reason) }
+    fun requestSync(reason: String, quick: Boolean = false) {
+        scope.launch { runSync(reason, quick) }
     }
 
-    fun syncIfStale(maxAgeMs: Long, reason: String) {
-        val last = maxOf(_state.value.lastRunAt, catalogStore.catalog.value.lastSyncAt)
-        if (System.currentTimeMillis() - last > maxAgeMs) requestSync(reason)
+    /** Milliseconds since the last sync finished (or the library was last synced). */
+    fun msSinceLastSync(): Long =
+        System.currentTimeMillis() - maxOf(_state.value.lastRunAt, catalogStore.catalog.value.lastSyncAt)
+
+    fun syncIfStale(maxAgeMs: Long, reason: String, quick: Boolean = false) {
+        if (_state.value.running) return
+        if (msSinceLastSync() > maxAgeMs) requestSync(reason, quick)
     }
 
     private companion object {
