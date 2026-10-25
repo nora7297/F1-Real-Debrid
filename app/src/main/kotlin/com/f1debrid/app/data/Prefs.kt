@@ -35,6 +35,7 @@ data class AppSettings(
         enabledSessions = enabledSessions,
         fetchComments = fetchComments,
         includeUnknownQuality = includeUnknownQuality,
+        maxPages = if (redditClientId != null) 3 else 1,
     )
 }
 

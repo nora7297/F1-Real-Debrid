@@ -41,8 +41,11 @@ enum class SessionType(val label: String, val order: Int) {
         fun labelOf(sessions: List<SessionType>): String {
             if (sessions.isEmpty()) return OTHER.label
             if (WEEKEND in sessions) return WEEKEND.label
-            if (sessions.count { it !in SHOWS } >= 3) return WEEKEND.label
-            return sessions.distinct().sortedBy { it.order }.joinToString(" + ") { it.label }
+            val core = sessions.distinct().filter { it !in SHOWS }
+            if (core.size >= 3) return WEEKEND.label
+            // Build-up and post-session shows ride along with the main session; name them only on their own.
+            val named = core.ifEmpty { sessions.distinct() }
+            return named.sortedBy { it.order }.joinToString(" + ") { it.label }
         }
     }
 }

@@ -20,7 +20,8 @@ import java.io.IOException
 data class SyncSettings(
     val subreddit: String = "MotorsportsReplays",
     val lookbackDays: Int = 21,
-    val maxPages: Int = 3,
+    /** 1 page = the newest 100 posts, about a week of the subreddit; more pages need a Reddit client ID. */
+    val maxPages: Int = 1,
     val pageSize: Int = 100,
     val qualityPolicy: QualityPolicy = QualityPolicy.PREFER_UHD,
     val enabledSessions: Set<SessionType> = DEFAULT_SESSIONS,
@@ -95,7 +96,7 @@ class SyncEngine(
         val retryHashes = catalog.entries.filter { it.rdTorrentId == null && it.addAttempts in 1..4 }.map { it.hash }
 
         onProgress("Checking r/${s.subreddit}…")
-        val posts = fetchPosts(s, startedAt, errors)
+        val posts = fetchPosts(s, startedAt, errors, onProgress)
         log("Fetched ${posts.size} posts")
 
         val commentsChecked = catalog.commentsChecked.toMutableMap()
@@ -234,13 +235,18 @@ class SyncEngine(
         return updated
     }
 
-    private suspend fun fetchPosts(s: SyncSettings, now: Long, errors: MutableList<String>): List<RedditPost> {
+    private suspend fun fetchPosts(
+        s: SyncSettings,
+        now: Long,
+        errors: MutableList<String>,
+        onProgress: suspend (String) -> Unit,
+    ): List<RedditPost> {
         val cutoff = now - s.lookbackDays.toLong() * DAY_MS
         val out = ArrayList<RedditPost>()
         var after: String? = null
         for (page in 0 until s.maxPages) {
             val result = try {
-                reddit.fetchNew(s.subreddit, s.pageSize, after)
+                if (page == 0) fetchFirstPage(s, onProgress) else reddit.fetchNew(s.subreddit, s.pageSize, after)
             } catch (e: Exception) {
                 if (page == 0) {
                     val hint = if (e is RateLimitedException) " Tip: a Reddit app client ID (Settings) removes this limit." else ""
@@ -255,6 +261,23 @@ class SyncEngine(
             after = result.after
         }
         return out
+    }
+
+    /** The first page is the one that matters: if Reddit asks us to slow down, wait and try again. */
+    private suspend fun fetchFirstPage(s: SyncSettings, onProgress: suspend (String) -> Unit): com.f1debrid.core.reddit.RedditPage {
+        var waits = 0
+        while (true) {
+            try {
+                return reddit.fetchNew(s.subreddit, s.pageSize, null)
+            } catch (e: RateLimitedException) {
+                if (waits >= MAX_RATE_LIMIT_WAITS) throw e
+                waits++
+                val wait = (e.retryAfterMs + 2_000L).coerceIn(5_000L, 75_000L)
+                onProgress("Reddit asked to slow down, retrying in ${wait / 1000} s…")
+                log("Rate limited on first page, waiting ${wait}ms")
+                sleep(wait)
+            }
+        }
     }
 
     private fun shouldCheckComments(post: RedditPost, checked: Map<String, Long>, now: Long): Boolean {
@@ -352,6 +375,7 @@ class SyncEngine(
     }
 
     private companion object {
+        const val MAX_RATE_LIMIT_WAITS = 2
         const val HOUR_MS = 3_600_000L
         const val DAY_MS = 86_400_000L
     }

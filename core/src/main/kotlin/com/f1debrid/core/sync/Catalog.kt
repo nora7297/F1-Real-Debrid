@@ -133,16 +133,23 @@ fun CatalogEntry.withInfo(info: RdTorrentInfo, now: Long): CatalogEntry {
  * Useful when one Reddit post holds several magnets that only differ by source (e.g. Sky vs F1TV).
  */
 fun CatalogEntry.withDerivedLabels(): CatalogEntry {
-    if (broadcaster != null && quality != Quality.UNKNOWN) return this
+    if (broadcaster != null && quality != Quality.UNKNOWN && sessions.isNotEmpty()) return this
+    val videoFiles = files.filter { it.selected && it.isVideo && !Naming.isSample(it.path) }
     val names = buildList {
         rdFilename?.let { add(it) }
-        files.filter { it.selected && it.isVideo }.forEach { add(it.name) }
+        videoFiles.forEach { add(it.name) }
     }
     if (names.isEmpty()) return this
     val parsed = names.map { F1TitleParser.parse(it) }
     val b = broadcaster ?: parsed.firstNotNullOfOrNull { it.broadcaster }
     val q = if (quality != Quality.UNKNOWN) quality else parsed.map { it.quality }.firstOrNull { it != Quality.UNKNOWN } ?: quality
-    return if (b == broadcaster && q == quality) this else copy(broadcaster = b, quality = q)
+    // Session: the torrent name first, otherwise everything the individual files cover.
+    val s = when {
+        sessions.isNotEmpty() -> sessions
+        else -> rdFilename?.let { F1TitleParser.parse(it).sessions }?.takeIf { it.isNotEmpty() }
+            ?: videoFiles.flatMap { it.sessions }.distinct().sortedBy { it.order }
+    }
+    return if (b == broadcaster && q == quality && s == sessions) this else copy(broadcaster = b, quality = q, sessions = s)
 }
 
 data class EventGroup(

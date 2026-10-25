@@ -20,8 +20,10 @@ interface RedditSource {
     suspend fun fetchCommentBodies(permalink: String): List<String>
 }
 
-class RateLimitedException(val retryAfterMs: Long) :
-    IOException("Reddit rate limit hit, anonymous access allows only a few requests per minute; cooling down ${retryAfterMs / 1000}s")
+class RateLimitedException(
+    val retryAfterMs: Long,
+    message: String = "Reddit rate limit hit, anonymous access allows only a few requests per minute; cooling down ${retryAfterMs / 1000}s",
+) : IOException(message)
 
 /**
  * Reads a subreddit without needing a Reddit account, trying several routes in order until one works:
@@ -43,7 +45,7 @@ class RedditClient(
     private val deviceId: String = UUID.randomUUID().toString().replace("-", "").take(30),
     private val oauthBase: String = "https://oauth.reddit.com",
     private val tokenUrl: String = "https://www.reddit.com/api/v1/access_token",
-    private val minIntervalMs: Long = 2500,
+    private val minIntervalMs: Long = 6500,
     private val sleep: suspend (Long) -> Unit = { delay(it) },
     private val clock: () -> Long = { System.currentTimeMillis() },
 ) : RedditSource {
@@ -126,7 +128,7 @@ class RedditClient(
             } catch (e: RateLimitedException) {
                 // Every anonymous route shares the same budget, so trying the others is pointless.
                 errors += "${attempt.label}: ${e.message}"
-                break
+                throw RateLimitedException(e.retryAfterMs, "Reddit $what failed (" + errors.joinToString("; ") + ")")
             } catch (e: Exception) {
                 markDead(attempt, DEAD_ROUTE_MS)
                 errors += "${attempt.label}: ${e.message ?: e.javaClass.simpleName}"

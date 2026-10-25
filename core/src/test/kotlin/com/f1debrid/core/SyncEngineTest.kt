@@ -12,6 +12,7 @@ import com.f1debrid.core.rd.RdTorrentSummary
 import com.f1debrid.core.rd.RdUnrestricted
 import com.f1debrid.core.rd.RdUser
 import com.f1debrid.core.rd.RealDebridClient
+import com.f1debrid.core.reddit.RateLimitedException
 import com.f1debrid.core.reddit.RedditPage
 import com.f1debrid.core.reddit.RedditPost
 import com.f1debrid.core.reddit.RedditSource
@@ -44,7 +45,12 @@ class SyncEngineTest {
 
     private class FakeReddit(val pages: List<RedditPage>, val comments: Map<String, List<String>> = emptyMap()) : RedditSource {
         var commentFetches = 0
+        var rateLimitsLeft = 0
         override suspend fun fetchNew(subreddit: String, limit: Int, after: String?): RedditPage {
+            if (rateLimitsLeft > 0) {
+                rateLimitsLeft--
+                throw RateLimitedException(10_000)
+            }
             val index = after?.toIntOrNull() ?: 0
             return pages.getOrElse(index) { RedditPage(emptyList(), null) }
         }
@@ -288,7 +294,33 @@ class SyncEngineTest {
         val reddit = FakeReddit(listOf(page1, page2, page3))
         val rd = FakeRd()
         val store = InMemoryCatalogStore()
-        val report = engine(reddit, rd, store, SyncSettings(qualityPolicy = QualityPolicy.BOTH)).sync()
+        val report = engine(reddit, rd, store, SyncSettings(qualityPolicy = QualityPolicy.BOTH, maxPages = 3)).sync()
         assertEquals(2, report.scannedPosts)
+    }
+
+    @Test
+    fun readsOnlyTheNewestPageByDefault() = runTest {
+        val reddit = FakeReddit(listOf(RedditPage(listOf(uhdRace), "1"), RedditPage(listOf(fhdQuali), null)))
+        val report = engine(reddit, FakeRd(), InMemoryCatalogStore(), SyncSettings(qualityPolicy = QualityPolicy.BOTH)).sync()
+        assertEquals(1, report.scannedPosts)
+    }
+
+    @Test
+    fun waitsOutARateLimitOnTheFirstPage() = runTest {
+        val reddit = FakeReddit(listOf(RedditPage(listOf(uhdRace), null))).apply { rateLimitsLeft = 2 }
+        val store = InMemoryCatalogStore()
+        val report = engine(reddit, FakeRd(), store).sync()
+        assertTrue(report.errors.isEmpty(), report.errors.joinToString())
+        assertEquals(1, report.scannedPosts)
+        assertEquals(setOf(hashUhd), store.catalog.entries.map { it.hash }.toSet())
+    }
+
+    @Test
+    fun givesUpAfterRepeatedRateLimitsWithAHint() = runTest {
+        val reddit = FakeReddit(listOf(RedditPage(listOf(uhdRace), null))).apply { rateLimitsLeft = 5 }
+        val report = engine(reddit, FakeRd(), InMemoryCatalogStore()).sync()
+        assertEquals(0, report.scannedPosts)
+        assertEquals(1, report.errors.size)
+        assertTrue(report.errors[0].contains("client ID"), report.errors[0])
     }
 }

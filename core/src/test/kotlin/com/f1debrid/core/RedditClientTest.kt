@@ -168,6 +168,7 @@ class RedditClientCooldownTest {
                 )
                 val first = assertFailsWith<IOException> { client.fetchNew("MotorsportsReplays", 100, null) }
                 assertTrue(first.message.orEmpty().contains("rate limit"), first.message)
+                assertTrue(first is com.f1debrid.core.reddit.RateLimitedException, "rate limit must keep its type for the sync to wait it out")
                 // Only one route was tried: the rest were skipped once the budget was known to be gone.
                 assertEquals(1, server.requestCount)
 

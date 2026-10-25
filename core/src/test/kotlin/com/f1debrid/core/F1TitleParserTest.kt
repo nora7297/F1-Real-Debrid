@@ -55,7 +55,7 @@ class F1TitleParserTest {
         val p = F1TitleParser.parse("Formula 1 2026 Monaco Grand Prix Pre-Race Show + Race + Post-Race Sky 1080p")
         assertEquals(setOf(SessionType.PRE_RACE, SessionType.RACE, SessionType.POST_RACE), p.sessions.toSet())
         assertEquals(SessionType.RACE, p.primarySession)
-        assertEquals("Pre-Race Show + Race + Post-Race Show", p.sessionLabel)
+        assertEquals("Race", p.sessionLabel)
     }
 
     @Test
