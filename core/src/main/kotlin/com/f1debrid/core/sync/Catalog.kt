@@ -66,6 +66,8 @@ data class Catalog(
     val lastSyncSummary: String? = null,
     /** Problems from the last sync, kept so they survive an app restart. */
     val lastSyncErrors: List<String> = emptyList(),
+    /** What the last sync saw and did with each F1 release, newest first. */
+    val lastSyncFindings: List<String> = emptyList(),
     /** Post id -> when its comments were last scanned for magnet links. */
     val commentsChecked: Map<String, Long> = emptyMap(),
     /** Releases the user removed; never auto-added again. */

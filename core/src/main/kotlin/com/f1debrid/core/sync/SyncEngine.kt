@@ -46,6 +46,8 @@ data class SyncReport(
     val updated: Int,
     val errors: List<String>,
     val durationMs: Long,
+    /** One line per F1 release (or F1 post without a link) seen, newest first, saying what happened to it. */
+    val findings: List<String> = emptyList(),
 ) {
     val summary: String
         get() = buildString {
@@ -85,6 +87,9 @@ class SyncEngine(
         val groupKey: String get() = "$eventKey|$primarySession"
         val displayTitle: String
             get() = listOfNotNull(gpName?.let { "$it GP" }, SessionType.labelOf(sessions), quality.label).joinToString(" · ")
+        val label: String
+            get() = listOfNotNull(SessionType.labelOf(sessions), quality.label.takeIf { quality != Quality.UNKNOWN }, broadcaster)
+                .joinToString(" · ")
     }
 
     suspend fun sync(onProgress: suspend (String) -> Unit = {}): SyncReport {
@@ -104,6 +109,7 @@ class SyncEngine(
         var commentFailures = 0
         var lastCommentError: String? = null
         val candidates = ArrayList<Candidate>()
+        val linkless = ArrayList<Finding>()
         var f1Posts = 0
         for (post in posts) {
             val parsed = F1TitleParser.parse(post.title, post.linkFlairText)
@@ -111,14 +117,21 @@ class SyncEngine(
             f1Posts++
             var magnets = Magnets.extract(post.selftext)
             if (magnets.isEmpty()) magnets = Magnets.extract(post.url?.takeIf { it.startsWith("magnet:", ignoreCase = true) })
-            if (magnets.isEmpty() && s.fetchComments && commentFetches < s.maxCommentFetches &&
+            val wantComments = if (magnets.isEmpty()) {
                 shouldCheckComments(post, commentsChecked, startedAt)
-            ) {
+            } else {
+                // Weekend threads often get later sessions added as comments.
+                shouldRecheckComments(post, commentsChecked, startedAt)
+            }
+            var commentsRead = false
+            if (wantComments && s.fetchComments && commentFetches < s.maxCommentFetches) {
                 commentFetches++
                 try {
                     onProgress("Reading comments: ${post.title.take(50)}")
-                    magnets = reddit.fetchCommentBodies(post.permalink).flatMap { Magnets.extract(it) }.distinctBy { it.infoHash }
+                    val fromComments = reddit.fetchCommentBodies(post.permalink).flatMap { Magnets.extract(it) }
+                    magnets = (magnets + fromComments).distinctBy { it.infoHash }
                     commentsChecked[post.id] = startedAt
+                    commentsRead = true
                 } catch (e: Exception) {
                     commentFailures++
                     lastCommentError = e.message
@@ -128,6 +141,10 @@ class SyncEngine(
             }
             val useContext = magnets.size > 1
             for (m in magnets) candidates += candidate(post, parsed, m, useContext)
+            if (magnets.isEmpty()) {
+                val where = if (commentsRead) "post or comments" else "post (comments not read this time)"
+                linkless += Finding(post.createdMillis, "No magnet link in the $where · ${short(post.title)}")
+            }
         }
         if (commentFailures > 0) {
             val hint = if (lastCommentError?.contains("rate limit", ignoreCase = true) == true) {
@@ -138,13 +155,25 @@ class SyncEngine(
         log("${candidates.size} magnet candidates from $f1Posts F1 posts")
 
         val known = catalog.entries.map { it.hash }.toHashSet()
-        val fresh = candidates
-            .sortedByDescending { it.post.createdMillis }
-            .distinctBy { it.hash }
-            .filter { it.hash !in known && it.hash !in catalog.ignoredHashes }
-            .filter { s.qualityPolicy.allows(it.quality) || (s.includeUnknownQuality && it.quality == Quality.UNKNOWN) }
-            .filter { it.primarySession in s.enabledSessions }
-        val toAdd = applyPolicy(fresh, catalog.entries, s.qualityPolicy).take(s.maxNewPerSync)
+        val ordered = candidates.sortedByDescending { it.post.createdMillis }.distinctBy { it.hash }
+        val outcome = HashMap<String, String>()
+        val fresh = ArrayList<Candidate>()
+        for (c in ordered) {
+            val reason = when {
+                c.hash in known -> "already in the library"
+                c.hash in catalog.ignoredHashes -> "not added: you removed it earlier"
+                !(s.qualityPolicy.allows(c.quality) || (s.includeUnknownQuality && c.quality == Quality.UNKNOWN)) ->
+                    "not added: ${if (c.quality == Quality.UNKNOWN) "no resolution in the title" else c.quality.label} (quality setting)"
+                c.primarySession !in s.enabledSessions -> "not added: ${c.primarySession.label} is switched off in Settings"
+                else -> null
+            }
+            if (reason != null) outcome[c.hash] = reason else fresh += c
+        }
+        val afterPolicy = applyPolicy(fresh, catalog.entries, s.qualityPolicy)
+        val afterPolicySet = afterPolicy.map { it.hash }.toHashSet()
+        fresh.filter { it.hash !in afterPolicySet }.forEach { outcome[it.hash] = "not added: a 4K version of this session is preferred" }
+        val toAdd = afterPolicy.take(s.maxNewPerSync)
+        afterPolicy.drop(s.maxNewPerSync).forEach { outcome[it.hash] = "waiting: too many new releases at once, next sync adds it" }
 
         var added = 0
         if (toAdd.isNotEmpty()) {
@@ -157,6 +186,7 @@ class SyncEngine(
             for (c in toAdd) {
                 onProgress("Adding ${c.displayTitle}")
                 val entry = addToRealDebrid(newEntry(c, startedAt), existing[c.hash], errors)
+                outcome[c.hash] = if (entry.rdError != null) "added, but Real-Debrid failed: ${entry.rdError}" else "added"
                 catalog = catalog.upsert(entry)
                 store.save(catalog)
                 added++
@@ -190,13 +220,17 @@ class SyncEngine(
             }
         }
 
-        val report = SyncReport(posts.size, f1Posts, candidates.size, added, updated, errors, clock() - startedAt)
+        val findings = (
+            ordered.map { c -> Finding(c.post.createdMillis, "${c.label} — ${outcome[c.hash] ?: "?"} · ${short(c.post.title)}") } + linkless
+            ).sortedByDescending { it.at }.map { it.text }.take(80)
+        val report = SyncReport(posts.size, f1Posts, candidates.size, added, updated, errors, clock() - startedAt, findings)
         val keepAfter = startedAt - 30L * DAY_MS
         catalog = catalog.copy(
             entries = catalog.entries.map { it.withDerivedLabels() },
             lastSyncAt = startedAt,
             lastSyncSummary = report.summary,
             lastSyncErrors = errors.toList(),
+            lastSyncFindings = findings,
             commentsChecked = commentsChecked.filterValues { it > keepAfter },
         )
         store.save(catalog)
@@ -278,6 +312,18 @@ class SyncEngine(
                 sleep(wait)
             }
         }
+    }
+
+    private class Finding(val at: Long, val text: String)
+
+    private fun short(title: String): String = if (title.length > 70) title.take(69) + "…" else title
+
+    /** Posts that already have links: look at the comments again while the weekend is fresh. */
+    private fun shouldRecheckComments(post: RedditPost, checked: Map<String, Long>, now: Long): Boolean {
+        if (post.numComments == 0) return false
+        if (now - post.createdMillis > 4 * DAY_MS) return false
+        val last = checked[post.id] ?: return true
+        return now - last > 6 * HOUR_MS
     }
 
     private fun shouldCheckComments(post: RedditPost, checked: Map<String, Long>, now: Long): Boolean {

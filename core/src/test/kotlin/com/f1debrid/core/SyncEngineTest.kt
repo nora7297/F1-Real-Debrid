@@ -299,6 +299,46 @@ class SyncEngineTest {
     }
 
     @Test
+    fun findingsExplainWhatHappenedToEachRelease() = runTest {
+        val noLink = post("p11", "Formula 1 2026 R18 United States Grand Prix FP3 discussion", "no links here", ageHours = 1)
+        val reddit = FakeReddit(listOf(RedditPage(listOf(noLink, uhdRace, fhdRace, fp1, f2), null)))
+        val store = InMemoryCatalogStore()
+        val report = engine(reddit, FakeRd(), store).sync()
+        val f = report.findings
+        assertTrue(f.any { it.startsWith("No magnet link in the post") && it.contains("FP3 discussion") }, f.joinToString("\n"))
+        assertTrue(f.any { it.startsWith("Race · 4K · Sky Sports F1 — added") }, f.joinToString("\n"))
+        assertTrue(f.any { it.startsWith("Race · 1080p · Sky Sports F1 — not added: a 4K version") }, f.joinToString("\n"))
+        assertTrue(f.any { it.startsWith("Practice 1 · 4K · Sky Sports F1 — not added: Practice 1 is switched off") }, f.joinToString("\n"))
+        assertTrue(f.none { it.contains("Formula 2") }, "non-F1 posts are not listed")
+        assertEquals(f, store.catalog.lastSyncFindings)
+
+        // Next sync: the same release is reported as already in the library.
+        val again = engine(reddit, FakeRd(), store).sync()
+        assertTrue(again.findings.any { it.startsWith("Race · 4K · Sky Sports F1 — already in the library") }, again.findings.joinToString("\n"))
+    }
+
+    @Test
+    fun commentsOfRecentPostsWithLinksAreReadToo() = runTest {
+        val thread = post(
+            "p12", "2026 F1 R18: United States Grand Prix", "**Race**\n\n${magnet(hashUhd, "F1.2026.R18.Race.SkyF1UHD.2160p")}",
+            ageHours = 20, comments = 4,
+        )
+        val reddit = FakeReddit(
+            listOf(RedditPage(listOf(thread), null)),
+            mapOf(thread.permalink to listOf("Quali: ${magnet(hashComment, "F1.2026.R18.Qualifying.SkyF1UHD.2160p")}")),
+        )
+        val store = InMemoryCatalogStore()
+        engine(reddit, FakeRd(), store).sync()
+        assertEquals(1, reddit.commentFetches)
+        assertEquals(setOf(hashUhd, hashComment), store.catalog.entries.map { it.hash }.toSet())
+        assertEquals(SessionType.QUALIFYING, store.catalog.find(hashComment)?.primarySession)
+
+        // Not re-read again within a few hours.
+        engine(reddit, FakeRd(), store).sync()
+        assertEquals(1, reddit.commentFetches)
+    }
+
+    @Test
     fun readsOnlyTheNewestPageByDefault() = runTest {
         val reddit = FakeReddit(listOf(RedditPage(listOf(uhdRace), "1"), RedditPage(listOf(fhdQuali), null)))
         val report = engine(reddit, FakeRd(), InMemoryCatalogStore(), SyncSettings(qualityPolicy = QualityPolicy.BOTH)).sync()

@@ -30,6 +30,7 @@ fun SyncReportScreen(graph: Graph, onBack: () -> Unit) {
     val catalog by graph.catalogStore.catalog.collectAsState()
     val report = sync.lastReport
     val errors = report?.errors ?: catalog.lastSyncErrors
+    val findings = report?.findings ?: catalog.lastSyncFindings
     val now = System.currentTimeMillis()
 
     ScreenScaffold(
@@ -59,6 +60,14 @@ fun SyncReportScreen(graph: Graph, onBack: () -> Unit) {
                         onClick = {},
                         headlineContent = { Text("${index + 1}. $error") },
                     )
+                }
+            }
+            item { SectionHeader("What the last sync found (${findings.size})") }
+            if (findings.isEmpty()) {
+                item { InfoText("Nothing yet – press Sync now on the home screen, then come back here.") }
+            } else {
+                items(findings.withIndex().toList(), key = { "f" + it.index }) { (_, line) ->
+                    ListItem(selected = false, onClick = {}, headlineContent = { Text(line) })
                 }
             }
             item { SectionHeader("Releases in the library (${catalog.entries.size})") }
