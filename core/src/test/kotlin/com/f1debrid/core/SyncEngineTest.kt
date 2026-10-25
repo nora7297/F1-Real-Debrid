@@ -379,6 +379,30 @@ class SyncEngineTest {
     }
 
     @Test
+    fun realCommentLayoutAddsThe4kAndExplainsTheRest() = runTest {
+        val h720 = "1111111111111111111111111111111111111111"
+        val h1080 = "2222222222222222222222222222222222222222"
+        val h2160 = "3333333333333333333333333333333333333333"
+        fun block(h: String, res: String, size: String) =
+            "Formula.1.2026x98.United.States.Qualifying.F1TV.$res.SS\nSize: $size\n\n" +
+                "magnet:?xt=urn:btih:${h.uppercase()}&dn=Formula.1.2026x98.United.States.Qualifying.F1TV.$res.SS&tr=udp://tracker.opentrackr.org:1337\n"
+        val comment = "lonewolf_sg: " + block(h720, "720p", "2.19 GB") + block(h1080, "1080p", "3.54 GB") + block(h2160, "2160p", "8.97 GB")
+        val reddit = FakeReddit(listOf(RedditPage(listOf(sessionThread), null)), mapOf(sessionThread.permalink to listOf(comment)))
+        val store = InMemoryCatalogStore()
+        val report = engine(reddit, FakeRd(), store).sync()
+        val added = store.catalog.find(h2160)
+        assertNotNull(added, report.findings.joinToString("\n"))
+        assertEquals("lonewolf_sg", added.author)
+        assertEquals("F1TV", added.broadcaster)
+        assertEquals(SessionType.QUALIFYING, added.primarySession)
+        assertEquals("2026-united-states", added.eventKey)
+        assertNull(store.catalog.find(h1080))
+        assertNull(store.catalog.find(h720))
+        assertTrue(report.findings.any { it.startsWith("Qualifying · 1080p · F1TV — not added: a 4K version") }, report.findings.joinToString("\n"))
+        assertTrue(report.findings.any { it.startsWith("Qualifying · 720p · F1TV — not added: 720p") }, report.findings.joinToString("\n"))
+    }
+
+    @Test
     fun rateLimitedCommentsAreRetriedWithinTheSync() = runTest {
         val reddit = FakeReddit(
             listOf(RedditPage(listOf(sessionThread), null)),
