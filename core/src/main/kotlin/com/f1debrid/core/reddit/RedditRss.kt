@@ -25,12 +25,16 @@ object RedditRss {
         return RedditPage(posts, after)
     }
 
-    fun extractCommentBodies(xml: String): List<String> =
+    fun extractCommentBodies(xml: String): List<String> = extractComments(xml).map { it.body }
+
+    fun extractComments(xml: String): List<RedditComment> =
         ENTRY.findAll(xml).mapNotNull { m ->
             val entry = m.groupValues[1]
             val id = tag(entry, "id")?.trim() ?: return@mapNotNull null
             if (!id.startsWith("t1_")) return@mapNotNull null
-            htmlToText(unescape(tag(entry, "content") ?: "")).ifBlank { null }
+            val body = htmlToText(unescape(tag(entry, "content") ?: "")).ifBlank { null } ?: return@mapNotNull null
+            val author = tag(entry, "name")?.trim()?.removePrefix("/u/")?.removePrefix("u/")
+            RedditComment(author, body)
         }.toList()
 
     private fun entryToPost(entry: String): RedditPost? {

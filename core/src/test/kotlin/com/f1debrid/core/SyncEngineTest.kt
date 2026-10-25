@@ -13,6 +13,7 @@ import com.f1debrid.core.rd.RdUnrestricted
 import com.f1debrid.core.rd.RdUser
 import com.f1debrid.core.rd.RealDebridClient
 import com.f1debrid.core.reddit.RateLimitedException
+import com.f1debrid.core.reddit.RedditComment
 import com.f1debrid.core.reddit.RedditPage
 import com.f1debrid.core.reddit.RedditPost
 import com.f1debrid.core.reddit.RedditSource
@@ -54,9 +55,18 @@ class SyncEngineTest {
             val index = after?.toIntOrNull() ?: 0
             return pages.getOrElse(index) { RedditPage(emptyList(), null) }
         }
-        override suspend fun fetchCommentBodies(permalink: String): List<String> {
+        var commentRateLimitsLeft = 0
+        override suspend fun fetchComments(permalink: String): List<RedditComment> {
+            if (commentRateLimitsLeft > 0) {
+                commentRateLimitsLeft--
+                throw RateLimitedException(10_000)
+            }
             commentFetches++
-            return comments[permalink] ?: emptyList()
+            return (comments[permalink] ?: emptyList()).map { body ->
+                // "user: text" lets a test name the commenter.
+                val author = body.substringBefore(": ", "").takeIf { it.isNotEmpty() && !it.contains(' ') } ?: "uploader"
+                RedditComment(author, body)
+            }
         }
     }
 
@@ -336,6 +346,70 @@ class SyncEngineTest {
         // Not re-read again within a few hours.
         engine(reddit, FakeRd(), store).sync()
         assertEquals(1, reddit.commentFetches)
+    }
+
+    private val sessionThread = post(
+        "p13", "[21:00 UTC] 2026 F1 - United States Grand Prix - Qualifying", "Post your links in the comments", ageHours = 12, comments = 6,
+    )
+
+    @Test
+    fun sessionThreadLinksInCommentsAreAddedAndCreditedToTheUploader() = runTest {
+        val reddit = FakeReddit(
+            listOf(RedditPage(listOf(sessionThread), null)),
+            mapOf(
+                sessionThread.permalink to listOf(
+                    "egortech: Sky UHD 2160p\n\n${magnet(hashUhd)}",
+                    "smcgill1969: F1TV 1080p\n\n${magnet(hashFhd)}",
+                    "someone: thanks for these!",
+                ),
+            ),
+        )
+        val store = InMemoryCatalogStore()
+        val report = engine(reddit, FakeRd(), store).sync()
+        assertTrue(report.errors.isEmpty(), report.errors.joinToString())
+        val uhd = store.catalog.find(hashUhd)
+        assertNotNull(uhd)
+        assertEquals("egortech", uhd.author)
+        assertEquals(Quality.UHD_2160, uhd.quality)
+        assertEquals(SessionType.QUALIFYING, uhd.primarySession)
+        assertEquals("2026-united-states", uhd.eventKey)
+        // 4K preferred: the 1080p link from the same thread is reported but not added.
+        assertNull(store.catalog.find(hashFhd))
+        assertTrue(report.findings.any { it.contains("1080p") && it.contains("4K version") }, report.findings.joinToString("\n"))
+    }
+
+    @Test
+    fun rateLimitedCommentsAreRetriedWithinTheSync() = runTest {
+        val reddit = FakeReddit(
+            listOf(RedditPage(listOf(sessionThread), null)),
+            mapOf(sessionThread.permalink to listOf("egortech: 2160p ${magnet(hashUhd)}")),
+        ).apply { commentRateLimitsLeft = 2 }
+        val store = InMemoryCatalogStore()
+        val report = engine(reddit, FakeRd(), store).sync()
+        assertTrue(report.errors.isEmpty(), report.errors.joinToString())
+        assertEquals(0, report.deferredComments)
+        assertNotNull(store.catalog.find(hashUhd))
+    }
+
+    @Test
+    fun persistentRateLimitDefersCommentsWithoutAnError() = runTest {
+        val reddit = FakeReddit(
+            listOf(RedditPage(listOf(sessionThread), null)),
+            mapOf(sessionThread.permalink to listOf("egortech: 2160p ${magnet(hashUhd)}")),
+        ).apply { commentRateLimitsLeft = 1_000 }
+        val store = InMemoryCatalogStore()
+        val report = engine(reddit, FakeRd(), store).sync()
+        assertTrue(report.errors.isEmpty(), report.errors.joinToString())
+        assertEquals(1, report.deferredComments)
+        assertTrue(report.summary.contains("1 thread(s) to read on the next pass"), report.summary)
+        assertTrue(report.findings.any { it.startsWith("Comments not read yet") }, report.findings.joinToString("\n"))
+        assertNull(store.catalog.commentsChecked["p13"], "a deferred thread must be read again next time")
+
+        // The follow-up pass reads it.
+        reddit.commentRateLimitsLeft = 0
+        val next = engine(reddit, FakeRd(), store).sync()
+        assertEquals(0, next.deferredComments)
+        assertNotNull(store.catalog.find(hashUhd))
     }
 
     @Test

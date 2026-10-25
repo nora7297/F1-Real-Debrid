@@ -6,6 +6,7 @@ import com.f1debrid.app.data.FileCatalogStore
 import com.f1debrid.app.data.Prefs
 import com.f1debrid.app.data.RdSession
 import com.f1debrid.app.sync.SyncCoordinator
+import com.f1debrid.app.sync.SyncScheduler
 import com.f1debrid.app.update.Updater
 import com.f1debrid.core.rd.RealDebridApi
 import com.f1debrid.core.rd.RealDebridAuth
@@ -35,7 +36,7 @@ class Graph(val app: Application) {
     val reddit = RedditClient(
         http,
         userAgent = "android:${BuildConfig.APPLICATION_ID}:v${BuildConfig.VERSION_NAME} (F1 replays to Real-Debrid TV app)",
-        clientId = { prefs.settings.value.redditClientId },
+        clientId = { prefs.settings.value.redditClientId ?: BuildConfig.REDDIT_CLIENT_ID.ifBlank { null } },
         deviceId = prefs.redditDeviceId,
     )
     val catalogStore = FileCatalogStore(app)
@@ -46,7 +47,7 @@ class Graph(val app: Application) {
         settings = { prefs.settings.value.toSyncSettings() },
         log = { Log.d(TAG, it) },
     )
-    val sync = SyncCoordinator(scope, engine, session, catalogStore)
+    val sync = SyncCoordinator(scope, engine, session, catalogStore) { n -> SyncScheduler.scheduleFollowUp(app, n) }
     val updater = Updater(app, http, scope)
 
     companion object {

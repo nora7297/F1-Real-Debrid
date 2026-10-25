@@ -96,7 +96,13 @@ each one returned.
 Anonymous access is tight: Reddit allows only about ten requests per minute per address. Without a
 client ID the app therefore reads just the newest 100 posts (roughly a week of the subreddit, plenty
 for one race weekend), spaces its requests out, and if Reddit still asks it to slow down it waits
-and retries instead of failing the sync. Creating an *installed app* at https://www.reddit.com/prefs/apps takes two minutes
+and retries instead of failing the sync.
+
+Session threads (e.g. "[21:00 UTC] 2026 F1 - United States Grand Prix - Qualifying") carry no link
+themselves; uploaders post their magnets as comments. The sync reads the comments of these threads
+first, newest first, re-reading them hourly while they are fresh, and credits each release to the
+commenter who posted it. If Reddit's limit stops it part-way, it schedules a follow-up sync five
+minutes later (up to six in a row) to read the rest. Creating an *installed app* at https://www.reddit.com/prefs/apps takes two minutes
 (name: anything, type: *installed app*, redirect URI: `http://localhost:8080`); the client ID is the
 short string shown under the app's name. Enter it under *Settings → Reddit app client ID* and the
 app switches to the official API with a generous limit.

@@ -51,6 +51,14 @@ class RedditJsonTest {
     }
 
     @Test
+    fun commentsKeepTheirAuthor() {
+        val withAuthor = comments.replace("{\"body\": \"second\"", "{\"author\": \"egortech\", \"body\": \"second\"")
+        val parsed = RedditJson.extractComments(withAuthor)
+        assertEquals("egortech", parsed[1].author)
+        assertEquals("second", parsed[1].body)
+    }
+
+    @Test
     fun toleratesRubbish() {
         assertTrue(RedditJson.parseListing("<html>blocked</html>").posts.isEmpty())
         assertTrue(RedditJson.extractCommentBodies("nope").isEmpty())

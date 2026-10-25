@@ -31,6 +31,9 @@ data class RedditPost(
 
 data class RedditPage(val posts: List<RedditPost>, val after: String?)
 
+/** A comment on a post; uploaders often post their magnet links this way. */
+data class RedditComment(val author: String?, val body: String)
+
 object RedditJson {
     val json: Json = Json {
         ignoreUnknownKeys = true
@@ -54,14 +57,19 @@ object RedditJson {
     }
 
     /** Every comment body in a Reddit comments response (any nesting depth). */
-    fun extractCommentBodies(body: String): List<String> {
-        val out = ArrayList<String>()
+    fun extractCommentBodies(body: String): List<String> = extractComments(body).map { it.body }
+
+    /** Every comment (author and body) in a Reddit comments response, at any nesting depth. */
+    fun extractComments(body: String): List<RedditComment> {
+        val out = ArrayList<RedditComment>()
         fun walk(e: JsonElement) {
             when (e) {
                 is JsonObject -> {
                     if ((e["kind"] as? JsonPrimitive)?.contentOrNull == "t1") {
-                        val text = (e["data"]?.jsonObject?.get("body") as? JsonPrimitive)?.contentOrNull
-                        if (!text.isNullOrBlank()) out += text
+                        val data = e["data"]?.jsonObject
+                        val text = (data?.get("body") as? JsonPrimitive)?.contentOrNull
+                        val author = (data?.get("author") as? JsonPrimitive)?.contentOrNull
+                        if (!text.isNullOrBlank()) out += RedditComment(author, text)
                     }
                     e.values.forEach(::walk)
                 }

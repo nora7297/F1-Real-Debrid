@@ -2,6 +2,7 @@ package com.f1debrid.app.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.f1debrid.app.BuildConfig
 import com.f1debrid.core.model.QualityPolicy
 import com.f1debrid.core.model.SessionType
 import com.f1debrid.core.rd.RdJson
@@ -35,7 +36,7 @@ data class AppSettings(
         enabledSessions = enabledSessions,
         fetchComments = fetchComments,
         includeUnknownQuality = includeUnknownQuality,
-        maxPages = if (redditClientId != null) 3 else 1,
+        maxPages = if (redditClientId != null || BuildConfig.REDDIT_CLIENT_ID.isNotBlank()) 3 else 1,
     )
 }
 

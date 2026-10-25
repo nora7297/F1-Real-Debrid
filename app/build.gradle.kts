@@ -19,6 +19,11 @@ android {
         targetSdk = 36
         versionCode = ciVersionCode
         versionName = "0.1.$ciVersionCode"
+
+        // Optional Reddit "installed app" client ID baked into the build (not a secret for that app type),
+        // so every install can use Reddit's official API without any setup. Empty = anonymous access.
+        val redditClientId = (project.findProperty("f1debrid.redditClientId") as String?)?.trim().orEmpty()
+        buildConfigField("String", "REDDIT_CLIENT_ID", "\"$redditClientId\"")
     }
 
     signingConfigs {

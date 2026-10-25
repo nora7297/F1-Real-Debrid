@@ -50,8 +50,9 @@ class RedditClientTest {
         // 3 hosts with the app UA + 1 browser-UA attempt fail, then the first RSS attempt succeeds.
         assertEquals(5, server.requestCount)
 
-        val bodies = client.fetchCommentBodies(page.posts[0].permalink)
-        assertEquals(2, bodies.size)
+        val comments = client.fetchComments(page.posts[0].permalink)
+        assertEquals(2, comments.size)
+        assertEquals("helper", comments[0].author)
         // RSS is now the preferred route, so the comments took a single request.
         assertEquals(6, server.requestCount)
     }
@@ -173,7 +174,7 @@ class RedditClientCooldownTest {
                 assertEquals(1, server.requestCount)
 
                 // Inside the cool-down nothing touches the network.
-                assertFailsWith<IOException> { client.fetchCommentBodies("/r/x/comments/y/z/") }
+                assertFailsWith<IOException> { client.fetchComments("/r/x/comments/y/z/") }
                 assertEquals(1, server.requestCount)
 
                 // After the cool-down requests flow again.

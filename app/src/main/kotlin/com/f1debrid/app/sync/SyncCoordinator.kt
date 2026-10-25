@@ -18,6 +18,8 @@ class SyncCoordinator(
     private val engine: SyncEngine,
     private val session: RdSession,
     private val catalogStore: FileCatalogStore,
+    /** Asks for another sync in a few minutes (n = how many follow-ups in a row this would be). */
+    private val onFollowUp: (Int) -> Unit = {},
 ) {
     data class State(
         val running: Boolean = false,
@@ -31,7 +33,7 @@ class SyncCoordinator(
     val state: StateFlow<State> = _state
     private val mutex = Mutex()
 
-    suspend fun runSync(reason: String): SyncReport? {
+    suspend fun runSync(reason: String, followUp: Int = 0): SyncReport? {
         if (!session.isLoggedIn) return null
         if (!mutex.tryLock()) return null
         try {
@@ -41,6 +43,10 @@ class SyncCoordinator(
             _state.update { it.copy(running = false, message = null, lastReport = report, lastRunAt = System.currentTimeMillis()) }
             Log.i(TAG, "Sync finished: ${report.summary}")
             report.errors.forEach { Log.w(TAG, "Sync error: $it") }
+            if (report.deferredComments > 0 && followUp < MAX_FOLLOW_UPS) {
+                Log.i(TAG, "${report.deferredComments} thread(s) left for Reddit's rate limit; follow-up ${followUp + 1} scheduled")
+                onFollowUp(followUp + 1)
+            }
             return report
         } catch (e: Exception) {
             Log.w(TAG, "Sync failed", e)
@@ -64,5 +70,6 @@ class SyncCoordinator(
 
     private companion object {
         const val TAG = "F1Debrid"
+        const val MAX_FOLLOW_UPS = 6
     }
 }

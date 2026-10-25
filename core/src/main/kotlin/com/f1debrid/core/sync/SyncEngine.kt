@@ -27,7 +27,10 @@ data class SyncSettings(
     val enabledSessions: Set<SessionType> = DEFAULT_SESSIONS,
     val maxNewPerSync: Int = 20,
     val fetchComments: Boolean = true,
-    val maxCommentFetches: Int = 5,
+    /** Comment threads read per sync; a weekend has about six session threads. */
+    val maxCommentFetches: Int = 8,
+    /** How long one sync may wait in total for Reddit's rate limit while reading comments. */
+    val maxRateLimitWaitMs: Long = 150_000,
     val includeUnknownQuality: Boolean = false,
 ) {
     companion object {
@@ -48,12 +51,15 @@ data class SyncReport(
     val durationMs: Long,
     /** One line per F1 release (or F1 post without a link) seen, newest first, saying what happened to it. */
     val findings: List<String> = emptyList(),
+    /** Comment threads still to read because Reddit asked us to slow down; a follow-up sync reads them. */
+    val deferredComments: Int = 0,
 ) {
     val summary: String
         get() = buildString {
             append("Scanned ").append(scannedPosts).append(" posts (").append(f1Posts).append(" F1)")
             append(", added ").append(added)
             if (updated > 0) append(", updated ").append(updated)
+            if (deferredComments > 0) append(", ").append(deferredComments).append(" thread(s) to read on the next pass")
             if (errors.isNotEmpty()) append(", ").append(errors.size).append(if (errors.size == 1) " error" else " errors")
         }
 }
@@ -73,6 +79,7 @@ class SyncEngine(
 ) {
     private class Candidate(
         val post: RedditPost,
+        val author: String?,
         val magnet: MagnetLink,
         val quality: Quality,
         val sessions: List<SessionType>,
@@ -105,52 +112,78 @@ class SyncEngine(
         log("Fetched ${posts.size} posts")
 
         val commentsChecked = catalog.commentsChecked.toMutableMap()
-        var commentFetches = 0
+        val scans = posts.mapNotNull { post ->
+            val parsed = F1TitleParser.parse(post.title, post.linkFlairText)
+            if (!parsed.isF1) return@mapNotNull null
+            var body = Magnets.extract(post.selftext)
+            if (body.isEmpty()) body = Magnets.extract(post.url?.takeIf { it.startsWith("magnet:", ignoreCase = true) })
+            PostScan(post, parsed, body)
+        }
+        val f1Posts = scans.size
+
+        // Comments: session threads (no link in the post) first, newest first, then recent posts that
+        // already have links, since later sessions are often added as comments.
+        val jobs = if (!s.fetchComments) emptyList() else
+            scans.filter { it.bodyMagnets.isEmpty() && shouldCheckComments(it.post, commentsChecked, startedAt) }
+                .sortedByDescending { it.post.createdMillis } +
+                scans.filter { it.bodyMagnets.isNotEmpty() && shouldRecheckComments(it.post, commentsChecked, startedAt) }
+                    .sortedByDescending { it.post.createdMillis }
+        jobs.forEach { it.comments = CommentState.WAITING }
         var commentFailures = 0
         var lastCommentError: String? = null
-        val candidates = ArrayList<Candidate>()
-        val linkless = ArrayList<Finding>()
-        var f1Posts = 0
-        for (post in posts) {
-            val parsed = F1TitleParser.parse(post.title, post.linkFlairText)
-            if (!parsed.isF1) continue
-            f1Posts++
-            var magnets = Magnets.extract(post.selftext)
-            if (magnets.isEmpty()) magnets = Magnets.extract(post.url?.takeIf { it.startsWith("magnet:", ignoreCase = true) })
-            val wantComments = if (magnets.isEmpty()) {
-                shouldCheckComments(post, commentsChecked, startedAt)
-            } else {
-                // Weekend threads often get later sessions added as comments.
-                shouldRecheckComments(post, commentsChecked, startedAt)
-            }
-            var commentsRead = false
-            if (wantComments && s.fetchComments && commentFetches < s.maxCommentFetches) {
-                commentFetches++
+        var waitedMs = 0L
+        var reads = 0
+        jobLoop@ for (job in jobs) {
+            if (reads >= s.maxCommentFetches) break
+            reads++
+            while (true) {
                 try {
-                    onProgress("Reading comments: ${post.title.take(50)}")
-                    val fromComments = reddit.fetchCommentBodies(post.permalink).flatMap { Magnets.extract(it) }
-                    magnets = (magnets + fromComments).distinctBy { it.infoHash }
-                    commentsChecked[post.id] = startedAt
-                    commentsRead = true
+                    onProgress("Reading comments: ${job.post.title.take(50)}")
+                    for (c in reddit.fetchComments(job.post.permalink)) {
+                        for (m in Magnets.extract(c.body)) job.commentMagnets += m to c.author
+                    }
+                    commentsChecked[job.post.id] = startedAt
+                    job.comments = CommentState.READ
+                    break
+                } catch (e: RateLimitedException) {
+                    val wait = (e.retryAfterMs + 2_000L).coerceIn(5_000L, 75_000L)
+                    if (waitedMs + wait > s.maxRateLimitWaitMs) break@jobLoop // the rest stay WAITING for a follow-up sync
+                    waitedMs += wait
+                    onProgress("Reddit asked to slow down, reading comments again in ${wait / 1000} s…")
+                    sleep(wait)
                 } catch (e: Exception) {
+                    job.comments = CommentState.FAILED
                     commentFailures++
                     lastCommentError = e.message
-                    // Reddit is usually rate-limiting at this point; stop spending requests on comments this run.
-                    commentFetches = s.maxCommentFetches
+                    break
                 }
             }
-            val useContext = magnets.size > 1
-            for (m in magnets) candidates += candidate(post, parsed, m, useContext)
-            if (magnets.isEmpty()) {
-                val where = if (commentsRead) "post or comments" else "post (comments not read this time)"
-                linkless += Finding(post.createdMillis, "No magnet link in the $where · ${short(post.title)}")
-            }
         }
+        val deferredComments = jobs.count { it.comments == CommentState.WAITING }
         if (commentFailures > 0) {
-            val hint = if (lastCommentError?.contains("rate limit", ignoreCase = true) == true) {
-                " Tip: a Reddit app client ID (Settings) removes this limit."
-            } else ""
-            errors += "Could not read the comments of $commentFailures post(s), will retry next sync: ${lastCommentError?.take(200)}$hint"
+            errors += "Could not read the comments of $commentFailures post(s), will retry next sync: ${lastCommentError?.take(200)}"
+        }
+
+        val candidates = ArrayList<Candidate>()
+        val linkless = ArrayList<Finding>()
+        for (scan in scans) {
+            val bodyHashes = scan.bodyMagnets.map { it.infoHash }.toHashSet()
+            val fromComments = scan.commentMagnets.distinctBy { it.first.infoHash }.filter { it.first.infoHash !in bodyHashes }
+            val total = scan.bodyMagnets.size + fromComments.size
+            for (m in scan.bodyMagnets) candidates += candidate(scan.post, scan.parsed, m, useContext = total > 1, author = scan.post.author)
+            // A comment is specific to its link, so its text always describes it.
+            for ((m, author) in fromComments) candidates += candidate(scan.post, scan.parsed, m, useContext = true, author = author ?: scan.post.author)
+            if (total == 0) {
+                val why = when (scan.comments) {
+                    CommentState.READ -> "No magnet link in the post or its comments yet"
+                    CommentState.WAITING -> "Comments not read yet (Reddit limit), retrying automatically"
+                    CommentState.FAILED -> "Could not read the comments"
+                    CommentState.NOT_NEEDED ->
+                        if (scan.post.id in commentsChecked) "No magnet link yet (comments checked recently)"
+                        else "No magnet link in the post"
+                }
+                linkless += Finding(scan.post.createdMillis, "$why · ${short(scan.post.title)}")
+            }
         }
         log("${candidates.size} magnet candidates from $f1Posts F1 posts")
 
@@ -223,7 +256,7 @@ class SyncEngine(
         val findings = (
             ordered.map { c -> Finding(c.post.createdMillis, "${c.label} — ${outcome[c.hash] ?: "?"} · ${short(c.post.title)}") } + linkless
             ).sortedByDescending { it.at }.map { it.text }.take(80)
-        val report = SyncReport(posts.size, f1Posts, candidates.size, added, updated, errors, clock() - startedAt, findings)
+        val report = SyncReport(posts.size, f1Posts, candidates.size, added, updated, errors, clock() - startedAt, findings, deferredComments)
         val keepAfter = startedAt - 30L * DAY_MS
         catalog = catalog.copy(
             entries = catalog.entries.map { it.withDerivedLabels() },
@@ -326,14 +359,24 @@ class SyncEngine(
         return now - last > 6 * HOUR_MS
     }
 
+    /** Posts without a link (session threads): read their comments, and again hourly while fresh. */
     private fun shouldCheckComments(post: RedditPost, checked: Map<String, Long>, now: Long): Boolean {
         if (post.numComments == 0) return false
-        val last = checked[post.id] ?: return true
         val age = now - post.createdMillis
-        return age < 3 * DAY_MS && now - last > 12 * HOUR_MS
+        if (age > 7 * DAY_MS) return false
+        val last = checked[post.id] ?: return true
+        val recheckAfter = if (age < 3 * DAY_MS) HOUR_MS else 12 * HOUR_MS
+        return now - last > recheckAfter
     }
 
-    private fun candidate(post: RedditPost, title: ParsedTitle, magnet: MagnetLink, useContext: Boolean): Candidate {
+    private enum class CommentState { NOT_NEEDED, WAITING, READ, FAILED }
+
+    private class PostScan(val post: RedditPost, val parsed: ParsedTitle, val bodyMagnets: List<MagnetLink>) {
+        val commentMagnets = ArrayList<Pair<MagnetLink, String?>>()
+        var comments = CommentState.NOT_NEEDED
+    }
+
+    private fun candidate(post: RedditPost, title: ParsedTitle, magnet: MagnetLink, useContext: Boolean, author: String?): Candidate {
         val dn = magnet.displayName?.let { F1TitleParser.parse(it) }
         val ctx = if (useContext) magnet.contextLabel?.let { F1TitleParser.parse(it) } else null
         val quality = listOfNotNull(dn?.quality, ctx?.quality, title.quality).firstOrNull { it != Quality.UNKNOWN } ?: Quality.UNKNOWN
@@ -343,7 +386,7 @@ class SyncEngine(
         val gp = title.gpName ?: dn?.gpName
         val broadcaster = dn?.broadcaster ?: ctx?.broadcaster ?: title.broadcaster
         val merged = ParsedTitle(true, quality, sessions, year, round, gp, broadcaster)
-        return Candidate(post, magnet, quality, sessions, year, round, gp, broadcaster, F1TitleParser.eventKey(merged, post.title))
+        return Candidate(post, author, magnet, quality, sessions, year, round, gp, broadcaster, F1TitleParser.eventKey(merged, post.title))
     }
 
     private fun applyPolicy(fresh: List<Candidate>, existing: List<CatalogEntry>, policy: QualityPolicy): List<Candidate> {
@@ -360,7 +403,7 @@ class SyncEngine(
         title = c.post.title,
         postId = c.post.id,
         postUrl = c.post.fullUrl,
-        author = c.post.author,
+        author = c.author,
         postedAt = c.post.createdMillis,
         quality = c.quality,
         sessions = c.sessions,

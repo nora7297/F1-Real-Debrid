@@ -17,7 +17,7 @@ import java.util.UUID
 
 interface RedditSource {
     suspend fun fetchNew(subreddit: String, limit: Int = 100, after: String? = null): RedditPage
-    suspend fun fetchCommentBodies(permalink: String): List<String>
+    suspend fun fetchComments(permalink: String): List<RedditComment>
 }
 
 class RateLimitedException(
@@ -89,13 +89,13 @@ class RedditClient(
         }
     }
 
-    override suspend fun fetchCommentBodies(permalink: String): List<String> {
+    override suspend fun fetchComments(permalink: String): List<RedditComment> {
         val path = "/" + permalink.trim('/')
         return tryAll("comments") { a ->
             when (a.mode) {
-                Mode.OAUTH -> RedditJson.extractCommentBodies(getOauth("$oauthBase$path?raw_json=1&limit=100&depth=2&sort=top"))
-                Mode.JSON -> RedditJson.extractCommentBodies(getJson("${a.host}$path.json?raw_json=1&limit=100&depth=2&sort=top", a.ua))
-                Mode.RSS -> RedditRss.extractCommentBodies(getFeed("${a.host}$path/.rss?limit=100", a.ua))
+                Mode.OAUTH -> RedditJson.extractComments(getOauth("$oauthBase$path?raw_json=1&limit=100&depth=2&sort=top"))
+                Mode.JSON -> RedditJson.extractComments(getJson("${a.host}$path.json?raw_json=1&limit=100&depth=2&sort=top", a.ua))
+                Mode.RSS -> RedditRss.extractComments(getFeed("${a.host}$path/.rss?limit=100", a.ua))
             }
         }
     }

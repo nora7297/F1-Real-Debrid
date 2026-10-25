@@ -135,6 +135,7 @@ fun SettingsScreen(graph: Graph, onBack: () -> Unit, onOpenReport: () -> Unit = 
                     when {
                         editingClientId -> "Type the client ID below and press Save"
                         settings.redditClientId != null -> "Set (${settings.redditClientId!!.take(4)}…) – Reddit's official API is used first"
+                        BuildConfig.REDDIT_CLIENT_ID.isNotBlank() -> "Built into the app – nothing to set up"
                         else -> "Not set. Only needed if Reddit keeps blocking the sync: create an \"installed app\" at reddit.com/prefs/apps and enter its ID here"
                     },
                 ) {
