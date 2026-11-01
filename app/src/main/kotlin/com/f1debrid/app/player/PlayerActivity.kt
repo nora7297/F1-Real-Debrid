@@ -23,6 +23,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
 import com.f1debrid.app.F1DebridApp
+import com.f1debrid.app.diag.AppLog
 
 /** Full-screen ExoPlayer with D-pad friendly controls; remembers the playback position per file. */
 @OptIn(UnstableApi::class)
@@ -119,6 +120,7 @@ class PlayerActivity : ComponentActivity() {
         if (resume > 0) exo.seekTo(resume)
         exo.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
+                AppLog.e("Playback error ${error.errorCodeName} playing \"$title\"", error)
                 Toast.makeText(this@PlayerActivity, "Playback error: ${error.errorCodeName}", Toast.LENGTH_LONG).show()
             }
 
@@ -129,6 +131,7 @@ class PlayerActivity : ComponentActivity() {
                 }
             }
         })
+        AppLog.i("Playing \"$title\"" + if (resume > 0) " from ${resume / 60_000} min" else "")
         exo.playWhenReady = true
         exo.prepare()
     }

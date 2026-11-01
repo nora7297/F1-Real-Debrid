@@ -9,7 +9,7 @@ import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.util.Log
+import com.f1debrid.app.diag.AppLog
 import androidx.core.content.FileProvider
 import com.f1debrid.app.BuildConfig
 import kotlinx.coroutines.CoroutineScope
@@ -87,9 +87,9 @@ class Updater(
         try {
             val info = fetchInfo()
             _state.value = if (info.versionCode > BuildConfig.VERSION_CODE) UpdateState.Available(info) else UpdateState.UpToDate
-            Log.i(TAG, "Update check: latest build ${info.versionCode}, running ${BuildConfig.VERSION_CODE}")
+            AppLog.i("Update check: latest build ${info.versionCode}, running ${BuildConfig.VERSION_CODE}")
         } catch (e: Exception) {
-            Log.w(TAG, "Update check failed", e)
+            AppLog.w("Update check failed", e)
             _state.value = UpdateState.Error("Update check failed: ${e.message}")
         }
     }
@@ -161,13 +161,13 @@ class Updater(
             }
             _state.value = UpdateState.ReadyToInstall(info, file)
         } catch (e: Exception) {
-            Log.w(TAG, "Update download failed", e)
+            AppLog.w("Update download failed", e)
             _state.value = UpdateState.Error("Download failed: ${e.message}", info)
             if (refreshOnFailure) {
                 // The release may have been replaced by a newer build since the check: re-read and try once more.
                 val fresh = runCatching { fetchInfo() }.getOrNull() ?: return
                 if (fresh.versionCode > BuildConfig.VERSION_CODE && (fresh.apk != info.apk || fresh.sha256 != info.sha256)) {
-                    Log.i(TAG, "Version file changed (build ${fresh.versionCode}); retrying download")
+                    AppLog.i("Version file changed (build ${fresh.versionCode}); retrying download")
                     downloadNow(fresh, refreshOnFailure = false)
                 }
             }
@@ -191,7 +191,7 @@ class Updater(
                 _state.value = UpdateState.NeedsPermission(info, file)
                 return
             } catch (e: ActivityNotFoundException) {
-                Log.w(TAG, "No settings screen for unknown app sources; trying the installer directly")
+                AppLog.w("No settings screen for unknown app sources; trying the installer directly")
             }
         }
         _state.value = UpdateState.Installing(info)
@@ -199,7 +199,7 @@ class Updater(
             try {
                 withContext(Dispatchers.IO) { installWithSession(info, file) }
             } catch (e: Exception) {
-                Log.w(TAG, "PackageInstaller session failed, falling back to the installer intent", e)
+                AppLog.w("PackageInstaller session failed, falling back to the installer intent", e)
                 installWithIntent(activityContext, info, file)
             }
         }
@@ -224,7 +224,7 @@ class Updater(
             val pending = PendingIntent.getBroadcast(app, sessionId, intent, flags)
             session.commit(pending.intentSender)
         }
-        Log.i(TAG, "Install session $sessionId committed for build ${info.versionCode}")
+        AppLog.i("Install session $sessionId committed for build ${info.versionCode}")
     }
 
     private fun installWithIntent(activityContext: Context, info: UpdateInfo, file: File) {
@@ -236,7 +236,7 @@ class Updater(
             activityContext.startActivity(intent)
             _state.value = UpdateState.ReadyToInstall(info, file)
         } catch (e: Exception) {
-            Log.w(TAG, "Could not start installer", e)
+            AppLog.w("Could not start installer", e)
             _state.value = UpdateState.Error("Could not open the installer: ${e.message}", info)
         }
     }
@@ -255,6 +255,6 @@ class Updater(
             success -> UpdateState.UpToDate
             else -> UpdateState.Error("Install failed: ${message ?: "unknown reason"}", info)
         }
-        Log.i(TAG, "Install result: success=$success message=$message")
+        AppLog.i("Install result: success=$success message=$message")
     }
 }

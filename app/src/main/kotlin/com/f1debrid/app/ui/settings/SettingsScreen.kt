@@ -35,6 +35,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.f1debrid.app.BuildConfig
 import com.f1debrid.app.Graph
+import com.f1debrid.app.diag.AppLog
 import com.f1debrid.app.data.AppSettings
 import com.f1debrid.app.data.PlayerChoice
 import com.f1debrid.app.sync.SyncScheduler
@@ -51,7 +52,7 @@ private val LOOKBACK_OPTIONS = listOf(7, 14, 21, 30, 60)
 private val INTERVAL_OPTIONS = listOf(3, 6, 12, 24)
 
 @Composable
-fun SettingsScreen(graph: Graph, onBack: () -> Unit, onOpenReport: () -> Unit = {}) {
+fun SettingsScreen(graph: Graph, onBack: () -> Unit, onOpenReport: () -> Unit = {}, onOpenLogs: () -> Unit = {}) {
     val settings by graph.prefs.settings.collectAsState()
     val tokens by graph.prefs.tokens.collectAsState()
     val catalog by graph.catalogStore.catalog.collectAsState()
@@ -84,6 +85,14 @@ fun SettingsScreen(graph: Graph, onBack: () -> Unit, onOpenReport: () -> Unit = 
                     title = UpdateUi.buttonLabel(update) ?: "Check for updates",
                     value = UpdateUi.statusText(update),
                 ) { UpdateUi.act(context, graph, update) }
+            }
+            item {
+                val crashes = remember { AppLog.crashes().size }
+                SettingRow(
+                    "Logs",
+                    if (crashes > 0) "$crashes crash report(s) saved – press to view, or show them as a QR code for your phone"
+                    else "What the app has been doing – press to view, or show it as a QR code for your phone",
+                ) { onOpenLogs() }
             }
             item { SectionHeader("What to add") }
             item {

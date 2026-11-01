@@ -1,6 +1,6 @@
 package com.f1debrid.app.data
 
-import android.util.Log
+import com.f1debrid.app.diag.AppLog
 import com.f1debrid.core.rd.RdApiException
 import com.f1debrid.core.rd.RdTokens
 import com.f1debrid.core.rd.RealDebridAuth
@@ -35,7 +35,7 @@ class RdSession(private val prefs: Prefs, private val auth: RealDebridAuth) : To
             prefs.saveTokens(updated)
             updated.accessToken
         } catch (e: RdApiException) {
-            Log.w("F1Debrid", "Token refresh failed: ${e.message}")
+            AppLog.w("Real-Debrid login refresh failed: ${e.message}")
             if (e.httpCode == 400 || e.httpCode == 401 || e.httpCode == 403) {
                 // Refresh token revoked: force a fresh login.
                 prefs.saveTokens(null)

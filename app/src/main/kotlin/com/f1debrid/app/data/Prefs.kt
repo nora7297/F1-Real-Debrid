@@ -73,6 +73,13 @@ class Prefs(context: Context) {
         _tokens.value = tokens
     }
 
+    /** Time of the newest crash the user has already seen on the Logs screen. */
+    fun crashesSeenAt(): Long = sp.getLong("crashes_seen_at", 0L)
+
+    fun markCrashesSeen() {
+        sp.edit().putLong("crashes_seen_at", System.currentTimeMillis()).apply()
+    }
+
     fun resumePosition(key: String): Long = sp.getLong("pos:$key", 0L)
 
     fun saveResumePosition(key: String, positionMs: Long) {

@@ -4,7 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
-import android.util.Log
+import com.f1debrid.app.diag.AppLog
 import androidx.core.content.IntentCompat
 import com.f1debrid.app.F1DebridApp
 
@@ -19,7 +19,7 @@ class InstallResultReceiver : BroadcastReceiver() {
         val updater = (context.applicationContext as F1DebridApp).graph.updater
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
-        Log.i("F1Debrid", "Install status $status: $message")
+        AppLog.i("Install status $status: $message")
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 val confirm = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)

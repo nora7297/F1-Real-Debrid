@@ -107,6 +107,14 @@ minutes later (up to six in a row) to read the rest. Creating an *installed app*
 short string shown under the app's name. Enter it under *Settings → Reddit app client ID* and the
 app switches to the official API with a generous limit.
 
+## Logs and crash reports
+
+*Settings → Logs* shows what the app has been doing (syncs, updates, playback) and the report of the
+latest crash. The app catches its own crashes, and on Android 11 and later it also records when the
+system closed it (frozen, native crash, low memory). *Show as QR code* turns the device details, the
+latest crash and recent log lines into a QR code: scan it with a phone camera and paste the text
+wherever you report the problem. Logs never include passwords or Real-Debrid tokens.
+
 ## How playback works
 
 A Real-Debrid torrent that is already cached finishes in a couple of seconds; one that is not is

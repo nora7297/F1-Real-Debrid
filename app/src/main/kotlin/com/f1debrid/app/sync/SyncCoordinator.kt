@@ -1,6 +1,6 @@
 package com.f1debrid.app.sync
 
-import android.util.Log
+import com.f1debrid.app.diag.AppLog
 import com.f1debrid.app.data.FileCatalogStore
 import com.f1debrid.app.data.RdSession
 import com.f1debrid.core.sync.SyncEngine
@@ -41,23 +41,23 @@ class SyncCoordinator(
         if (!session.isLoggedIn) return null
         if (!mutex.tryLock()) return null
         try {
-            Log.i(TAG, "Sync started ($reason)")
+            AppLog.i("Sync started ($reason)")
             _state.update { it.copy(running = true, message = "Starting sync…", fraction = 0f, lastError = null, retryAt = null) }
             val report = engine.sync { p -> _state.update { it.copy(message = p.text, fraction = p.fraction ?: it.fraction) } }
             _state.update {
                 it.copy(running = false, message = null, fraction = null, lastReport = report, lastRunAt = System.currentTimeMillis())
             }
-            Log.i(TAG, "Sync finished: ${report.summary}")
-            report.errors.forEach { Log.w(TAG, "Sync error: $it") }
+            AppLog.i("Sync finished in ${report.durationMs / 1000} s: ${report.summary}")
+            report.errors.forEach { AppLog.w("Sync problem: $it") }
             if (report.retryLater && followUp < MAX_FOLLOW_UPS) {
-                Log.i(TAG, "Reddit rate limit left work undone; follow-up ${followUp + 1} scheduled")
+                AppLog.i("Reddit rate limit left work undone; automatic retry ${followUp + 1} in ${SyncScheduler.FOLLOW_UP_DELAY_MINUTES} min")
                 onFollowUp(followUp + 1)
                 val at = System.currentTimeMillis() + SyncScheduler.FOLLOW_UP_DELAY_MINUTES * 60_000L
                 _state.update { it.copy(retryAt = at) }
             }
             return report
         } catch (e: Exception) {
-            Log.w(TAG, "Sync failed", e)
+            AppLog.e("Sync failed", e)
             _state.update {
                 it.copy(running = false, message = null, fraction = null, lastError = e.message ?: e.toString(), lastRunAt = System.currentTimeMillis())
             }

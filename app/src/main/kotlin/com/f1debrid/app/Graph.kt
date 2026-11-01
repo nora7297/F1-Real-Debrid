@@ -1,7 +1,7 @@
 package com.f1debrid.app
 
 import android.app.Application
-import android.util.Log
+import com.f1debrid.app.diag.AppLog
 import com.f1debrid.app.data.FileCatalogStore
 import com.f1debrid.app.data.Prefs
 import com.f1debrid.app.data.RdSession
@@ -45,7 +45,7 @@ class Graph(val app: Application) {
         rd = rd,
         store = catalogStore,
         settings = { prefs.settings.value.toSyncSettings() },
-        log = { Log.d(TAG, it) },
+        log = { AppLog.i(it) },
     )
     val sync = SyncCoordinator(scope, engine, session, catalogStore) { n -> SyncScheduler.scheduleFollowUp(app, n) }
     val updater = Updater(app, http, scope)

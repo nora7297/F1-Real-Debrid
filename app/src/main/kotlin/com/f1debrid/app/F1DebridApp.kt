@@ -1,6 +1,7 @@
 package com.f1debrid.app
 
 import android.app.Application
+import com.f1debrid.app.diag.AppLog
 import com.f1debrid.app.sync.SyncScheduler
 
 class F1DebridApp : Application() {
@@ -9,6 +10,7 @@ class F1DebridApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        AppLog.init(this)
         graph = Graph(this)
         SyncScheduler.schedule(this, graph.prefs.settings.value.syncIntervalHours)
     }

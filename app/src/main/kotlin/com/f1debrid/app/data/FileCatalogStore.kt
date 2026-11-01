@@ -1,7 +1,7 @@
 package com.f1debrid.app.data
 
 import android.content.Context
-import android.util.Log
+import com.f1debrid.app.diag.AppLog
 import com.f1debrid.core.sync.Catalog
 import com.f1debrid.core.sync.CatalogStore
 import kotlinx.coroutines.Dispatchers
@@ -50,7 +50,7 @@ class FileCatalogStore(context: Context) : CatalogStore {
     private fun readFromDisk(): Catalog {
         if (!file.exists()) return Catalog()
         return runCatching { json.decodeFromString(Catalog.serializer(), file.readText()) }
-            .onFailure { Log.w("F1Debrid", "Could not read catalog, starting fresh", it) }
+            .onFailure { AppLog.w("Could not read the library file, starting fresh", it) }
             .getOrDefault(Catalog())
     }
 }

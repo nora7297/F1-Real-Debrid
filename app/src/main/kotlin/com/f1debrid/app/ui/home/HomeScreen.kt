@@ -29,6 +29,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.f1debrid.app.BuildConfig
 import com.f1debrid.app.Graph
+import com.f1debrid.app.diag.AppLog
 import com.f1debrid.app.update.UpdateState
 import com.f1debrid.app.update.UpdateUi
 import com.f1debrid.app.ui.common.InfoText
@@ -97,6 +98,14 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     ) {
         if (sync.running) {
             SyncProgressPanel(sync.message ?: "Syncing…", sync.fraction ?: 0f)
+        }
+        val lastCrash = remember { AppLog.crashes().firstOrNull()?.at ?: 0L }
+        if (lastCrash > graph.prefs.crashesSeenAt()) {
+            InfoText(
+                "The app closed unexpectedly last time. Settings → Logs has the details – please send them over.",
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
         }
         val retryAt = sync.retryAt
         if (!sync.running && retryAt != null && retryAt > now) {
