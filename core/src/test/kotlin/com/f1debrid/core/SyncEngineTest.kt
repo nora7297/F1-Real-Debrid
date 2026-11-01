@@ -437,6 +437,44 @@ class SyncEngineTest {
     }
 
     @Test
+    fun slowMagnetGetsItsFilesChosenOnALaterSync() = runTest {
+        val rd = FakeRd()
+        rd.seed("slow1", hashUhd, "waiting_files_selection")
+        val entry = CatalogEntry(
+            hash = hashUhd, magnet = magnet(hashUhd), title = "t", postId = "p1", postUrl = "u", eventKey = "2026-mexico",
+            quality = Quality.UHD_2160, sessions = listOf(SessionType.QUALIFYING), rdTorrentId = "slow1", rdStatus = "magnet_conversion",
+        )
+        val store = InMemoryCatalogStore(Catalog(entries = listOf(entry)))
+        engine(FakeReddit(listOf(RedditPage(emptyList(), null))), rd, store).sync()
+        assertEquals(listOf(1), rd.selected["slow1"])
+        val after = store.catalog.find(hashUhd)!!
+        assertEquals("downloaded", after.rdStatus)
+        assertTrue(after.isReady)
+    }
+
+    @Test
+    fun oldEntriesGetTheCanonicalRaceAndBlock1080pDuplicates() = runTest {
+        val old4k = CatalogEntry(
+            hash = hashUhd, magnet = magnet(hashUhd), title = "Formula 1 2026 Round 19 Mexican Grand Prix Qualifying", postId = "p1",
+            postUrl = "u", year = 2026, round = 19, gpName = "Mexican", eventKey = "2026-mexican",
+            quality = Quality.UHD_2160, sessions = listOf(SessionType.QUALIFYING), rdTorrentId = "x", rdStatus = "downloaded",
+        )
+        val thread = post("p20", "[21:00 UTC] 2026 F1 - Mexico City Grand Prix - Qualifying", "links below", ageHours = 3, comments = 2)
+        val reddit = FakeReddit(
+            listOf(RedditPage(listOf(thread), null)),
+            mapOf(thread.permalink to listOf("lonewolf_sg: F1TV 1080p ${magnet(hashFhd, "Formula.1.2026x99.Mexico.City.Qualifying.F1TV.1080p.SS")}")),
+        )
+        val store = InMemoryCatalogStore(Catalog(entries = listOf(old4k)))
+        val report = engine(reddit, FakeRd(), store).sync()
+        assertNull(store.catalog.find(hashFhd), report.findings.joinToString("\n"))
+        assertTrue(report.findings.any { it.contains("1080p") && it.contains("4K version") }, report.findings.joinToString("\n"))
+        val migrated = store.catalog.find(hashUhd)!!
+        assertEquals("2026-mexico", migrated.eventKey)
+        assertEquals("Mexico City", migrated.gpName)
+        assertEquals(now, store.catalog.lastSyncAttemptAt)
+    }
+
+    @Test
     fun readsOnlyTheNewestPageByDefault() = runTest {
         val reddit = FakeReddit(listOf(RedditPage(listOf(uhdRace), "1"), RedditPage(listOf(fhdQuali), null)))
         val report = engine(reddit, FakeRd(), InMemoryCatalogStore(), SyncSettings(qualityPolicy = QualityPolicy.BOTH)).sync()

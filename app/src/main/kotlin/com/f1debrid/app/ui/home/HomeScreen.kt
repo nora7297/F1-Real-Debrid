@@ -72,12 +72,11 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
         subtitle = subtitle,
         actions = {
             UpdateUi.buttonLabel(update)?.let { label ->
-                Button(
-                    onClick = { UpdateUi.act(context, graph, update) },
-                    enabled = update !is UpdateState.Downloading && update !is UpdateState.Installing && update !is UpdateState.Installed,
-                ) { Text(label) }
+                // Never disable a button: on Android TV a disabled focused button leaves nothing focused
+                // and the remote stops working. Presses while busy are ignored instead.
+                Button(onClick = { UpdateUi.act(context, graph, update) }) { Text(label) }
             }
-            Button(onClick = { graph.sync.requestSync("manual") }, enabled = !sync.running) {
+            Button(onClick = { if (!sync.running) graph.sync.requestSync("manual") }) {
                 Text(if (sync.running) "Syncing…" else "Sync now")
             }
             Button(onClick = onSettings) { Text("Settings") }

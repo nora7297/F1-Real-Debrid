@@ -139,9 +139,9 @@ object F1TitleParser {
 
     /** Stable key used to group releases that belong to the same race weekend. */
     fun eventKey(p: ParsedTitle, fallback: String): String = when {
-        p.year != null && p.gpName != null -> "${p.year}-${slug(p.gpName)}"
+        p.year != null && p.gpName != null -> "${p.year}-${GrandPrix.find(p.gpName)?.key ?: slug(p.gpName)}"
         p.year != null && p.round != null -> "${p.year}-r${p.round.toString().padStart(2, '0')}"
-        p.gpName != null -> "unknown-${slug(p.gpName)}"
+        p.gpName != null -> "unknown-${GrandPrix.find(p.gpName)?.key ?: slug(p.gpName)}"
         p.round != null -> "unknown-r${p.round.toString().padStart(2, '0')}"
         else -> "misc-" + slug(fallback).take(40)
     }

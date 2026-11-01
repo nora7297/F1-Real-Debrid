@@ -23,6 +23,14 @@ object Naming {
         return if (e.gpName != null && e.round != null) "$base (Round ${e.round})" else base
     }
 
+    /** Title for a group of releases of one race: the round can come from any of them. */
+    fun groupTitle(entries: List<CatalogEntry>): String {
+        val named = entries.firstOrNull { it.gpName != null } ?: entries.first()
+        val round = named.round ?: entries.firstNotNullOfOrNull { it.round }
+        val year = named.year ?: entries.firstNotNullOfOrNull { it.year }
+        return eventTitle(named.copy(round = round, year = year))
+    }
+
     fun entryTitle(e: CatalogEntry): String = buildString {
         val videos = e.files.count { it.isVideo && it.selected && !isSample(it.path) }
         append(if (e.sessions.isEmpty() && videos >= 2) "Weekend pack" else e.sessionLabel)

@@ -6,6 +6,7 @@ import com.f1debrid.core.model.Quality
 import com.f1debrid.core.model.QualityPolicy
 import com.f1debrid.core.model.SessionType
 import com.f1debrid.core.parse.F1TitleParser
+import com.f1debrid.core.parse.GrandPrix
 import com.f1debrid.core.parse.ParsedTitle
 import com.f1debrid.core.rd.RdApiException
 import com.f1debrid.core.rd.RdStatus
@@ -106,6 +107,9 @@ class SyncEngine(
         var catalog = store.load()
         // Releases whose add failed in an earlier run; retried below (never the ones added in this run).
         val retryHashes = catalog.entries.filter { it.rdTorrentId == null && it.addAttempts in 1..4 }.map { it.hash }
+
+        catalog = catalog.copy(lastSyncAttemptAt = startedAt)
+        store.save(catalog)
 
         onProgress("Checking r/${s.subreddit}…")
         val posts = fetchPosts(s, startedAt, errors, onProgress)
@@ -240,7 +244,7 @@ class SyncEngine(
         for (e in pending) {
             val id = e.rdTorrentId ?: continue
             try {
-                catalog = catalog.upsert(e.withInfo(rd.torrentInfo(id), clock()))
+                catalog = catalog.upsert(e.withInfo(currentInfo(id), clock()))
                 updated++
             } catch (ex: RdApiException) {
                 if (ex.httpCode == 404) {
@@ -259,7 +263,7 @@ class SyncEngine(
         val report = SyncReport(posts.size, f1Posts, candidates.size, added, updated, errors, clock() - startedAt, findings, deferredComments)
         val keepAfter = startedAt - 30L * DAY_MS
         catalog = catalog.copy(
-            entries = catalog.entries.map { it.withDerivedLabels() },
+            entries = catalog.entries.map { it.withDerivedLabels().withCanonicalEvent() },
             lastSyncAt = startedAt,
             lastSyncSummary = report.summary,
             lastSyncErrors = errors.toList(),
@@ -280,7 +284,7 @@ class SyncEngine(
             addToRealDebrid(entry, null, ArrayList())
         } else {
             try {
-                entry.withInfo(rd.torrentInfo(id), clock())
+                entry.withInfo(currentInfo(id), clock())
             } catch (ex: RdApiException) {
                 if (ex.httpCode == 404) entry.copy(rdStatus = RdStatus.MISSING, rdError = "Removed from Real-Debrid", updatedAt = clock())
                 else entry.copy(rdError = ex.message, updatedAt = clock())
@@ -383,7 +387,7 @@ class SyncEngine(
         val sessions = listOfNotNull(dn?.sessions, ctx?.sessions, title.sessions).firstOrNull { it.isNotEmpty() } ?: emptyList()
         val year = title.year ?: dn?.year
         val round = title.round ?: dn?.round
-        val gp = title.gpName ?: dn?.gpName
+        val gp = (title.gpName ?: dn?.gpName)?.let { GrandPrix.find(it)?.display ?: it }
         val broadcaster = dn?.broadcaster ?: ctx?.broadcaster ?: title.broadcaster
         val merged = ParsedTitle(true, quality, sessions, year, round, gp, broadcaster)
         return Candidate(post, author, magnet, quality, sessions, year, round, gp, broadcaster, F1TitleParser.eventKey(merged, post.title))
@@ -393,7 +397,7 @@ class SyncEngine(
         if (policy != QualityPolicy.PREFER_UHD) return fresh
         val uhdGroups = HashSet<String>()
         fresh.filter { it.quality == Quality.UHD_2160 }.mapTo(uhdGroups) { it.groupKey }
-        existing.filter { it.quality == Quality.UHD_2160 && !it.isFailed }.mapTo(uhdGroups) { it.groupKey }
+        existing.filter { it.quality == Quality.UHD_2160 && !it.isFailed }.mapTo(uhdGroups) { it.withCanonicalEvent().groupKey }
         return fresh.filter { it.quality == Quality.UHD_2160 || it.groupKey !in uhdGroups }
     }
 
@@ -456,6 +460,17 @@ class SyncEngine(
             errors += "Add ${Naming.entryTitle(entry)}: ${e.message}"
             entry.copy(rdError = e.message ?: "network error", addAttempts = entry.addAttempts + 1, updatedAt = clock())
         }
+    }
+
+    /**
+     * Latest state of a torrent. A torrent that was still reading its magnet when it was added ends up
+     * waiting for its files to be chosen; choose the videos now so it starts downloading.
+     */
+    private suspend fun currentInfo(id: String): com.f1debrid.core.rd.RdTorrentInfo {
+        val info = rd.torrentInfo(id)
+        if (info.status != RdStatus.WAITING_FILES_SELECTION) return info
+        rd.selectFiles(id, pickVideoFileIds(info.files))
+        return rd.torrentInfo(id)
     }
 
     private fun pickVideoFileIds(files: List<RdTorrentFile>): List<Int>? {

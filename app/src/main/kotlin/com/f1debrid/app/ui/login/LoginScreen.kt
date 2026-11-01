@@ -111,7 +111,7 @@ fun LoginScreen(graph: Graph) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(
                     onClick = {
-                        scope.launch {
+                        if (token.isNotBlank() && !manualBusy) scope.launch {
                             manualBusy = true
                             manualError = null
                             try {
@@ -124,7 +124,6 @@ fun LoginScreen(graph: Graph) {
                             manualBusy = false
                         }
                     },
-                    enabled = token.isNotBlank() && !manualBusy,
                 ) { Text(if (manualBusy) "Checking…" else "Save token") }
                 Button(onClick = { manual = false; manualError = null }) { Text("Back to code login") }
             }

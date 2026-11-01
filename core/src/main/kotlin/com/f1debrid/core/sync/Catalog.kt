@@ -3,6 +3,7 @@ package com.f1debrid.core.sync
 import com.f1debrid.core.model.Quality
 import com.f1debrid.core.model.SessionType
 import com.f1debrid.core.parse.F1TitleParser
+import com.f1debrid.core.parse.GrandPrix
 import com.f1debrid.core.rd.RdStatus
 import com.f1debrid.core.rd.RdTorrentInfo
 import kotlinx.serialization.Serializable
@@ -63,6 +64,8 @@ data class CatalogEntry(
 data class Catalog(
     val entries: List<CatalogEntry> = emptyList(),
     val lastSyncAt: Long = 0,
+    /** When the last sync started, even if it never finished (e.g. the app was closed mid-sync). */
+    val lastSyncAttemptAt: Long = 0,
     val lastSyncSummary: String? = null,
     /** Problems from the last sync, kept so they survive an app restart. */
     val lastSyncErrors: List<String> = emptyList(),
@@ -161,15 +164,21 @@ data class EventGroup(
     val entries: List<CatalogEntry>,
 )
 
+/** Canonical Grand Prix name and group key, so differently named posts of one race group together. */
+fun CatalogEntry.withCanonicalEvent(): CatalogEntry {
+    val gp = GrandPrix.find(gpName) ?: return this
+    val key = if (year != null) "$year-${gp.key}" else eventKey
+    return if (gpName == gp.display && eventKey == key) this else copy(gpName = gp.display, eventKey = key)
+}
+
 object CatalogGrouping {
     fun group(entries: List<CatalogEntry>): List<EventGroup> =
-        entries.groupBy { it.eventKey }.map { (key, list) ->
+        entries.map { it.withCanonicalEvent() }.groupBy { it.eventKey }.map { (key, list) ->
             val sorted = list.sortedWith(
                 compareBy<CatalogEntry> { it.primarySession.order }
                     .thenByDescending { it.quality.rank }
                     .thenByDescending { it.postedAt },
             )
-            val titleSource = list.firstOrNull { it.gpName != null } ?: list.first()
-            EventGroup(key, Naming.eventTitle(titleSource), list.maxOf { it.postedAt }, sorted)
+            EventGroup(key, Naming.groupTitle(list), list.maxOf { it.postedAt }, sorted)
         }.sortedByDescending { it.newestPostedAt }
 }

@@ -64,7 +64,10 @@ class SyncCoordinator(
     }
 
     fun syncIfStale(maxAgeMs: Long, reason: String) {
-        val last = maxOf(_state.value.lastRunAt, catalogStore.catalog.value.lastSyncAt)
+        if (_state.value.running) return
+        val catalog = catalogStore.catalog.value
+        // A sync that started recently counts too, even if the app was closed before it finished.
+        val last = maxOf(_state.value.lastRunAt, catalog.lastSyncAt, catalog.lastSyncAttemptAt)
         if (System.currentTimeMillis() - last > maxAgeMs) requestSync(reason)
     }
 

@@ -137,16 +137,16 @@ fun DetailsScreen(graph: Graph, hash: String, onBack: () -> Unit) {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         val first = playable.firstOrNull()
                         if (first != null) {
-                            Button(onClick = { requestPlay(first) }, enabled = busy == null) {
+                            Button(onClick = { if (busy == null) requestPlay(first) }) {
                                 Text(if (playable.size == 1) "Play" else "Play ${Naming.fileTitle(first)}")
                             }
-                            Button(onClick = { play(first, external = true) }, enabled = busy == null) {
+                            Button(onClick = { if (busy == null) play(first, external = true) }) {
                                 Text("External player")
                             }
                         }
                         Button(
                             onClick = {
-                                scope.launch {
+                                if (busy == null) scope.launch {
                                     busy = "Checking Real-Debrid…"
                                     error = null
                                     try {
@@ -157,12 +157,11 @@ fun DetailsScreen(graph: Graph, hash: String, onBack: () -> Unit) {
                                     busy = null
                                 }
                             },
-                            enabled = busy == null,
                         ) { Text("Refresh status") }
                         if (entry.isFailed || entry.rdStatus == RdStatus.MISSING || entry.rdTorrentId == null) {
                             Button(
                                 onClick = {
-                                    scope.launch {
+                                    if (busy == null) scope.launch {
                                         busy = "Adding to Real-Debrid…"
                                         error = null
                                         try {
@@ -173,7 +172,6 @@ fun DetailsScreen(graph: Graph, hash: String, onBack: () -> Unit) {
                                         busy = null
                                     }
                                 },
-                                enabled = busy == null,
                             ) { Text("Re-add to Real-Debrid") }
                         }
                         Button(
@@ -195,7 +193,7 @@ fun DetailsScreen(graph: Graph, hash: String, onBack: () -> Unit) {
             if (playable.isNotEmpty()) {
                 item(key = "files-header") { SectionHeader("Files (${playable.size})") }
                 items(playable, key = { "p" + it.rdFileId }) { file ->
-                    FileRow(file, enabled = busy == null, onClick = { requestPlay(file) })
+                    FileRow(file, enabled = true, onClick = { if (busy == null) requestPlay(file) })
                 }
             }
             if (others.isNotEmpty()) {
