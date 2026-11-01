@@ -24,6 +24,10 @@ class SyncCoordinator(
     data class State(
         val running: Boolean = false,
         val message: String? = null,
+        /** 0..1 while a sync runs, for the progress bar. */
+        val fraction: Float? = null,
+        /** When the automatic follow-up sync is due, if one is scheduled. */
+        val retryAt: Long? = null,
         val lastReport: SyncReport? = null,
         val lastError: String? = null,
         val lastRunAt: Long = 0,
@@ -38,20 +42,24 @@ class SyncCoordinator(
         if (!mutex.tryLock()) return null
         try {
             Log.i(TAG, "Sync started ($reason)")
-            _state.update { it.copy(running = true, message = "Starting sync…", lastError = null) }
-            val report = engine.sync { msg -> _state.update { it.copy(message = msg) } }
-            _state.update { it.copy(running = false, message = null, lastReport = report, lastRunAt = System.currentTimeMillis()) }
+            _state.update { it.copy(running = true, message = "Starting sync…", fraction = 0f, lastError = null, retryAt = null) }
+            val report = engine.sync { p -> _state.update { it.copy(message = p.text, fraction = p.fraction ?: it.fraction) } }
+            _state.update {
+                it.copy(running = false, message = null, fraction = null, lastReport = report, lastRunAt = System.currentTimeMillis())
+            }
             Log.i(TAG, "Sync finished: ${report.summary}")
             report.errors.forEach { Log.w(TAG, "Sync error: $it") }
-            if (report.deferredComments > 0 && followUp < MAX_FOLLOW_UPS) {
-                Log.i(TAG, "${report.deferredComments} thread(s) left for Reddit's rate limit; follow-up ${followUp + 1} scheduled")
+            if (report.retryLater && followUp < MAX_FOLLOW_UPS) {
+                Log.i(TAG, "Reddit rate limit left work undone; follow-up ${followUp + 1} scheduled")
                 onFollowUp(followUp + 1)
+                val at = System.currentTimeMillis() + SyncScheduler.FOLLOW_UP_DELAY_MINUTES * 60_000L
+                _state.update { it.copy(retryAt = at) }
             }
             return report
         } catch (e: Exception) {
             Log.w(TAG, "Sync failed", e)
             _state.update {
-                it.copy(running = false, message = null, lastError = e.message ?: e.toString(), lastRunAt = System.currentTimeMillis())
+                it.copy(running = false, message = null, fraction = null, lastError = e.message ?: e.toString(), lastRunAt = System.currentTimeMillis())
             }
             return null
         } finally {

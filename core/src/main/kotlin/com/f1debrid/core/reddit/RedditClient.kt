@@ -233,6 +233,7 @@ class RedditClient(
     private suspend fun execute(req: Request): HttpResult = withContext(Dispatchers.IO) {
         http.newCall(req).execute().use { resp ->
             val retryAfter = resp.header("Retry-After")?.trim()?.toLongOrNull()?.times(1000)
+                ?: resp.header("x-ratelimit-reset")?.trim()?.toDoubleOrNull()?.let { (it * 1000).toLong() }
             HttpResult(resp.code, resp.body?.string().orEmpty(), retryAfter)
         }
     }

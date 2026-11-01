@@ -34,9 +34,10 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 object SyncScheduler {
     private const val UNIQUE_NAME = "f1debrid-periodic-sync"
     private const val FOLLOW_UP_NAME = "f1debrid-follow-up-sync"
+    const val FOLLOW_UP_DELAY_MINUTES = 5L
 
     /** One more sync in a few minutes, to read comment threads Reddit's rate limit held back. */
-    fun scheduleFollowUp(context: Context, followUp: Int, delayMinutes: Long = 5) {
+    fun scheduleFollowUp(context: Context, followUp: Int, delayMinutes: Long = FOLLOW_UP_DELAY_MINUTES) {
         val request = OneTimeWorkRequestBuilder<SyncWorker>()
             .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
             .setInputData(Data.Builder().putInt(SyncWorker.KEY_FOLLOW_UP, followUp).build())

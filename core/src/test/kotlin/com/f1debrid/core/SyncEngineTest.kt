@@ -47,10 +47,11 @@ class SyncEngineTest {
     private class FakeReddit(val pages: List<RedditPage>, val comments: Map<String, List<String>> = emptyMap()) : RedditSource {
         var commentFetches = 0
         var rateLimitsLeft = 0
+        var rateLimitMs = 10_000L
         override suspend fun fetchNew(subreddit: String, limit: Int, after: String?): RedditPage {
             if (rateLimitsLeft > 0) {
                 rateLimitsLeft--
-                throw RateLimitedException(10_000)
+                throw RateLimitedException(rateLimitMs)
             }
             val index = after?.toIntOrNull() ?: 0
             return pages.getOrElse(index) { RedditPage(emptyList(), null) }
@@ -498,5 +499,32 @@ class SyncEngineTest {
         assertEquals(0, report.scannedPosts)
         assertEquals(1, report.errors.size)
         assertTrue(report.errors[0].contains("client ID"), report.errors[0])
+        assertTrue(report.listingRateLimited)
+        assertTrue(report.retryLater, "a refused post list must schedule an automatic retry")
+    }
+
+    @Test
+    fun countdownTicksEverySecondAndProgressMovesForward() = runTest {
+        val reddit = FakeReddit(listOf(RedditPage(listOf(uhdRace), null))).apply { rateLimitsLeft = 1 }
+        val seen = ArrayList<com.f1debrid.core.sync.SyncProgress>()
+        engine(reddit, FakeRd(), InMemoryCatalogStore()).sync { seen += it }
+        val texts = seen.map { it.text }
+        assertTrue(texts.any { it.contains("trying again in 12 s") }, texts.joinToString("\n"))
+        assertTrue(texts.any { it.contains("trying again in 11 s") }, texts.joinToString("\n"))
+        assertTrue(texts.any { it.contains("trying again in 1 s") }, texts.joinToString("\n"))
+        val fractions = seen.mapNotNull { it.fraction }
+        assertTrue(fractions.isNotEmpty())
+        assertEquals(fractions.sorted(), fractions, "progress never goes backwards")
+        assertTrue(texts.any { it.startsWith("Adding to Real-Debrid 1 of 1") }, texts.joinToString("\n"))
+    }
+
+    @Test
+    fun aLongRateLimitIsLeftToTheAutomaticRetry() = runTest {
+        val reddit = FakeReddit(listOf(RedditPage(listOf(uhdRace), null))).apply { rateLimitsLeft = 1; rateLimitMs = 300_000 }
+        val seen = ArrayList<com.f1debrid.core.sync.SyncProgress>()
+        val report = engine(reddit, FakeRd(), InMemoryCatalogStore()).sync { seen += it }
+        assertTrue(seen.none { it.text.contains("trying again in") }, "no five-minute countdown on screen")
+        assertTrue(report.retryLater)
+        assertEquals(0, report.scannedPosts)
     }
 }

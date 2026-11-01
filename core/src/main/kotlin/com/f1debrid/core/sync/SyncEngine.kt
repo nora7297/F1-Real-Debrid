@@ -42,6 +42,9 @@ data class SyncSettings(
     }
 }
 
+/** What a running sync is doing; [fraction] (0..1) drives the progress bar. */
+data class SyncProgress(val text: String, val fraction: Float? = null)
+
 data class SyncReport(
     val scannedPosts: Int,
     val f1Posts: Int,
@@ -54,7 +57,12 @@ data class SyncReport(
     val findings: List<String> = emptyList(),
     /** Comment threads still to read because Reddit asked us to slow down; a follow-up sync reads them. */
     val deferredComments: Int = 0,
+    /** Reddit refused the post list itself because of its rate limit. */
+    val listingRateLimited: Boolean = false,
 ) {
+    /** Another sync should run by itself in a few minutes. */
+    val retryLater: Boolean get() = deferredComments > 0 || listingRateLimited
+
     val summary: String
         get() = buildString {
             append("Scanned ").append(scannedPosts).append(" posts (").append(f1Posts).append(" F1)")
@@ -100,7 +108,7 @@ class SyncEngine(
                 .joinToString(" · ")
     }
 
-    suspend fun sync(onProgress: suspend (String) -> Unit = {}): SyncReport {
+    suspend fun sync(onProgress: suspend (SyncProgress) -> Unit = {}): SyncReport {
         val s = settings()
         val startedAt = clock()
         val errors = ArrayList<String>()
@@ -111,8 +119,8 @@ class SyncEngine(
         catalog = catalog.copy(lastSyncAttemptAt = startedAt)
         store.save(catalog)
 
-        onProgress("Checking r/${s.subreddit}…")
-        val posts = fetchPosts(s, startedAt, errors, onProgress)
+        onProgress(SyncProgress("Checking r/${s.subreddit} for new posts…", 0.03f))
+        val (posts, listingRateLimited) = fetchPosts(s, startedAt, errors, onProgress)
         log("Fetched ${posts.size} posts")
 
         val commentsChecked = catalog.commentsChecked.toMutableMap()
@@ -137,12 +145,14 @@ class SyncEngine(
         var lastCommentError: String? = null
         var waitedMs = 0L
         var reads = 0
+        val planned = minOf(jobs.size, s.maxCommentFetches)
         jobLoop@ for (job in jobs) {
             if (reads >= s.maxCommentFetches) break
             reads++
+            val fraction = 0.2f + 0.5f * (reads - 1) / planned.coerceAtLeast(1)
             while (true) {
                 try {
-                    onProgress("Reading comments: ${job.post.title.take(50)}")
+                    onProgress(SyncProgress("Reading comments $reads of $planned: ${job.post.title.take(50)}", fraction))
                     for (c in reddit.fetchComments(job.post.permalink)) {
                         for (m in Magnets.extract(c.body)) job.commentMagnets += m to c.author
                     }
@@ -150,11 +160,14 @@ class SyncEngine(
                     job.comments = CommentState.READ
                     break
                 } catch (e: RateLimitedException) {
+                    // A long ban is not worth waiting for on screen; the follow-up sync picks these up.
+                    if (e.retryAfterMs > MAX_INLINE_WAIT_MS) break@jobLoop
                     val wait = (e.retryAfterMs + 2_000L).coerceIn(5_000L, 75_000L)
                     if (waitedMs + wait > s.maxRateLimitWaitMs) break@jobLoop // the rest stay WAITING for a follow-up sync
                     waitedMs += wait
-                    onProgress("Reddit asked to slow down, reading comments again in ${wait / 1000} s…")
-                    sleep(wait)
+                    countdown(wait, fraction, onProgress) { secs ->
+                        "Reading comments $reads of $planned – Reddit asked us to wait, trying again in $secs s"
+                    }
                 } catch (e: Exception) {
                     job.comments = CommentState.FAILED
                     commentFailures++
@@ -220,8 +233,8 @@ class SyncEngine(
                 errors += "Could not list Real-Debrid torrents: ${e.message}"
                 emptyMap()
             }
-            for (c in toAdd) {
-                onProgress("Adding ${c.displayTitle}")
+            for ((i, c) in toAdd.withIndex()) {
+                onProgress(SyncProgress("Adding to Real-Debrid ${i + 1} of ${toAdd.size}: ${c.displayTitle}", 0.7f + 0.25f * i / toAdd.size))
                 val entry = addToRealDebrid(newEntry(c, startedAt), existing[c.hash], errors)
                 outcome[c.hash] = if (entry.rdError != null) "added, but Real-Debrid failed: ${entry.rdError}" else "added"
                 catalog = catalog.upsert(entry)
@@ -233,14 +246,14 @@ class SyncEngine(
         for (hash in retryHashes) {
             val e = catalog.find(hash) ?: continue
             if (e.rdTorrentId != null) continue
-            onProgress("Retrying ${Naming.entryTitle(e)}")
+            onProgress(SyncProgress("Retrying ${Naming.entryTitle(e)}", 0.95f))
             catalog = catalog.upsert(addToRealDebrid(e, null, errors))
             store.save(catalog)
         }
 
         var updated = 0
         val pending = catalog.entries.filter { it.rdTorrentId != null && RdStatus.isPending(it.rdStatus) }.take(30)
-        if (pending.isNotEmpty()) onProgress("Refreshing ${pending.size} in-progress release(s)")
+        if (pending.isNotEmpty()) onProgress(SyncProgress("Checking ${pending.size} release(s) still downloading on Real-Debrid", 0.96f))
         for (e in pending) {
             val id = e.rdTorrentId ?: continue
             try {
@@ -260,7 +273,9 @@ class SyncEngine(
         val findings = (
             ordered.map { c -> Finding(c.post.createdMillis, "${c.label} — ${outcome[c.hash] ?: "?"} · ${short(c.post.title)}") } + linkless
             ).sortedByDescending { it.at }.map { it.text }.take(80)
-        val report = SyncReport(posts.size, f1Posts, candidates.size, added, updated, errors, clock() - startedAt, findings, deferredComments)
+        val report = SyncReport(
+            posts.size, f1Posts, candidates.size, added, updated, errors, clock() - startedAt, findings, deferredComments, listingRateLimited,
+        )
         val keepAfter = startedAt - 30L * DAY_MS
         catalog = catalog.copy(
             entries = catalog.entries.map { it.withDerivedLabels().withCanonicalEvent() },
@@ -310,8 +325,8 @@ class SyncEngine(
         s: SyncSettings,
         now: Long,
         errors: MutableList<String>,
-        onProgress: suspend (String) -> Unit,
-    ): List<RedditPost> {
+        onProgress: suspend (SyncProgress) -> Unit,
+    ): Pair<List<RedditPost>, Boolean> {
         val cutoff = now - s.lookbackDays.toLong() * DAY_MS
         val out = ArrayList<RedditPost>()
         var after: String? = null
@@ -320,10 +335,15 @@ class SyncEngine(
                 if (page == 0) fetchFirstPage(s, onProgress) else reddit.fetchNew(s.subreddit, s.pageSize, after)
             } catch (e: Exception) {
                 if (page == 0) {
-                    val hint = if (e is RateLimitedException) " Tip: a Reddit app client ID (Settings) removes this limit." else ""
-                    errors += "Reddit: ${e.message}$hint"
+                    if (e is RateLimitedException) {
+                        errors += "Reddit asked us to wait before reading new posts. The app will try again by itself in a few " +
+                            "minutes. (A Reddit app client ID in Settings removes this limit.)"
+                        return out to true
+                    }
+                    errors += "Reddit: ${e.message}"
+                } else {
+                    log("Stopped paging after ${out.size} posts: ${e.message}")
                 }
-                else log("Stopped paging after ${out.size} posts: ${e.message}")
                 break
             }
             val recent = result.posts.filter { it.createdMillis >= cutoff }
@@ -331,23 +351,38 @@ class SyncEngine(
             if (result.after == null || result.posts.isEmpty() || recent.size < result.posts.size) break
             after = result.after
         }
-        return out
+        return out to false
     }
 
     /** The first page is the one that matters: if Reddit asks us to slow down, wait and try again. */
-    private suspend fun fetchFirstPage(s: SyncSettings, onProgress: suspend (String) -> Unit): com.f1debrid.core.reddit.RedditPage {
+    private suspend fun fetchFirstPage(s: SyncSettings, onProgress: suspend (SyncProgress) -> Unit): com.f1debrid.core.reddit.RedditPage {
         var waits = 0
         while (true) {
             try {
                 return reddit.fetchNew(s.subreddit, s.pageSize, null)
             } catch (e: RateLimitedException) {
-                if (waits >= MAX_RATE_LIMIT_WAITS) throw e
+                if (waits >= MAX_RATE_LIMIT_WAITS || e.retryAfterMs > MAX_INLINE_WAIT_MS) throw e
                 waits++
                 val wait = (e.retryAfterMs + 2_000L).coerceIn(5_000L, 75_000L)
-                onProgress("Reddit asked to slow down, retrying in ${wait / 1000} s…")
                 log("Rate limited on first page, waiting ${wait}ms")
-                sleep(wait)
+                countdown(wait, 0.05f, onProgress) { secs -> "Reddit asked us to wait – trying again in $secs s (attempt ${waits + 1} of ${MAX_RATE_LIMIT_WAITS + 1})" }
             }
+        }
+    }
+
+    /** Waits [totalMs], updating the progress text every second so the countdown visibly moves. */
+    private suspend fun countdown(
+        totalMs: Long,
+        fraction: Float?,
+        onProgress: suspend (SyncProgress) -> Unit,
+        text: (Long) -> String,
+    ) {
+        var remaining = totalMs
+        while (remaining > 0) {
+            onProgress(SyncProgress(text((remaining + 999) / 1000), fraction))
+            val step = minOf(1_000L, remaining)
+            sleep(step)
+            remaining -= step
         }
     }
 
@@ -480,6 +515,8 @@ class SyncEngine(
 
     private companion object {
         const val MAX_RATE_LIMIT_WAITS = 2
+        /** Longer rate-limit waits are left to the automatic follow-up sync instead of a countdown. */
+        const val MAX_INLINE_WAIT_MS = 90_000L
         const val HOUR_MS = 3_600_000L
         const val DAY_MS = 86_400_000L
     }

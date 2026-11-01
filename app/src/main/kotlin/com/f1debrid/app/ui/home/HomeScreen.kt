@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,6 +18,8 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -29,6 +32,7 @@ import com.f1debrid.app.Graph
 import com.f1debrid.app.update.UpdateState
 import com.f1debrid.app.update.UpdateUi
 import com.f1debrid.app.ui.common.InfoText
+import com.f1debrid.app.ui.common.ProgressBar
 import com.f1debrid.app.ui.common.ScreenScaffold
 import com.f1debrid.app.ui.common.StatusPill
 import com.f1debrid.app.ui.common.statusColor
@@ -49,17 +53,23 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
-            delay(30_000)
+            delay(15_000)
             now = System.currentTimeMillis()
         }
+    }
+
+    // Start with the remote on "Sync now", so there is always something selected.
+    val syncFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        if (!initialFocusDone) initialFocusDone = runCatching { syncFocus.requestFocus() }.isSuccess
     }
 
     val errorList = sync.lastReport?.errors ?: catalog.lastSyncErrors
     val firstError = sync.lastError ?: errorList.firstOrNull()
     val subtitle = buildString {
         append("v").append(BuildConfig.VERSION_NAME).append(" · ")
-        if (sync.message != null) {
-            append(sync.message)
+        if (sync.running) {
+            append("Syncing…")
         } else {
             append("Last sync: ").append(Naming.relativeTime(catalog.lastSyncAt, now))
             catalog.lastSyncSummary?.let { append(" · ").append(it) }
@@ -76,12 +86,24 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
                 // and the remote stops working. Presses while busy are ignored instead.
                 Button(onClick = { UpdateUi.act(context, graph, update) }) { Text(label) }
             }
-            Button(onClick = { if (!sync.running) graph.sync.requestSync("manual") }) {
+            Button(
+                onClick = { if (!sync.running) graph.sync.requestSync("manual") },
+                modifier = Modifier.focusRequester(syncFocus),
+            ) {
                 Text(if (sync.running) "Syncing…" else "Sync now")
             }
             Button(onClick = onSettings) { Text("Settings") }
         },
     ) {
+        if (sync.running) {
+            SyncProgressPanel(sync.message ?: "Syncing…", sync.fraction ?: 0f)
+        }
+        val retryAt = sync.retryAt
+        if (!sync.running && retryAt != null && retryAt > now) {
+            val minutes = ((retryAt - now + 59_999) / 60_000).coerceAtLeast(1)
+            InfoText("Reddit asked us to wait. The app will try again by itself in about $minutes min – you can keep watching meanwhile.")
+            Spacer(modifier = Modifier.height(8.dp))
+        }
         if (firstError != null && !sync.running) {
             val more = if (sync.lastError != null) 0 else errorList.size - 1
             val shown = if (firstError.length > 220) firstError.take(220) + "…" else firstError
@@ -117,6 +139,22 @@ fun HomeScreen(graph: Graph, onOpen: (String) -> Unit, onSettings: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+private var initialFocusDone = false
+
+@Composable
+private fun SyncProgressPanel(message: String, fraction: Float) {
+    Column(modifier = Modifier.padding(bottom = 12.dp)) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 2,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        ProgressBar(fraction = fraction, modifier = Modifier.fillMaxWidth(0.6f))
     }
 }
 

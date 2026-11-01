@@ -187,3 +187,41 @@ class RedditClientCooldownTest {
         }
     }
 }
+
+
+class RedditClientResetHeaderTest {
+    @Test
+    fun usesRedditsResetHeaderWhenThereIsNoRetryAfter() {
+        kotlinx.coroutines.test.runTest {
+            val server = MockWebServer()
+            var calls = 0
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    val path = request.path.orEmpty()
+                    if (path.contains(".json")) return MockResponse().setResponseCode(403).setBody("blocked")
+                    calls++
+                    return if (calls == 1) {
+                        MockResponse().setResponseCode(429).setHeader("x-ratelimit-reset", "4").setBody("slow down")
+                    } else {
+                        MockResponse().setBody(RssFixtures.listing)
+                    }
+                }
+            }
+            server.start()
+            try {
+                val sleeps = ArrayList<Long>()
+                var now = 9_000_000L
+                val base = server.url("/").toString().trimEnd('/')
+                val client = RedditClient(
+                    OkHttpClient(), "test-agent", hosts = listOf("$base/www"),
+                    minIntervalMs = 0, sleep = { ms -> sleeps += ms; now += ms }, clock = { now },
+                )
+                val page = client.fetchNew("MotorsportsReplays", 100, null)
+                assertEquals(2, page.posts.size)
+                assertTrue(sleeps.contains(4_000L), sleeps.toString())
+            } finally {
+                server.shutdown()
+            }
+        }
+    }
+}
